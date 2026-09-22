@@ -8,6 +8,7 @@ import {
   Clock3,
   Compass,
   Filter,
+  GripVertical,
   Heart,
   MapPin,
   Menu,
@@ -293,7 +294,7 @@ export default function Home() {
   const [selectedDestination, setSelectedDestination] = useState<DestinationId>("kyoto");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activityQuery, setActivityQuery] = useState("");
-  const [category, setCategory] = useState<Category>("All");
+  const [selectedCategories, setSelectedCategories] = useState<Exclude<Category, "All">[]>([]);
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("All");
   const [activeDay, setActiveDay] = useState<DayId>("Day 1");
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
@@ -305,6 +306,7 @@ export default function Home() {
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [notice, setNotice] = useState("");
+  const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
 
   const destination = destinations.find((item) => item.id === selectedDestination) ?? destinations[0];
   const activities = activityData[selectedDestination];
@@ -325,7 +327,7 @@ export default function Home() {
     const query = activityQuery.trim().toLowerCase();
     return activities.filter((activity) => {
       const matchesQuery = `${activity.name} ${activity.description} ${activity.location}`.toLowerCase().includes(query);
-      const matchesCategory = category === "All" || activity.category === category;
+      const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(activity.category);
       const matchesPrice =
         priceFilter === "All" ||
         (priceFilter === "Under $30" && activity.price < 30) ||
@@ -333,7 +335,7 @@ export default function Home() {
         (priceFilter === "$70+" && activity.price > 70);
       return matchesQuery && matchesCategory && matchesPrice;
     });
-  }, [activities, activityQuery, category, priceFilter]);
+  }, [activities, activityQuery, selectedCategories, priceFilter]);
 
   const flashNotice = (message: string) => {
     setNotice(message);
@@ -344,7 +346,7 @@ export default function Home() {
     setSelectedDestination(id);
     setDestinationQuery("");
     setActivityQuery("");
-    setCategory("All");
+    setSelectedCategories([]);
     setPriceFilter("All");
     setSelectedActivityId(null);
     setItinerary({ "Day 1": [], "Day 2": [], "Day 3": [] });
@@ -364,6 +366,44 @@ export default function Home() {
     flashNotice(`Added to ${day}`);
   };
 
+  const toggleCategory = (value: Category) => {
+    if (value === "All") {
+      setSelectedCategories([]);
+      return;
+    }
+    setSelectedCategories((current) => current.includes(value)
+      ? current.filter((item) => item !== value)
+      : [...current, value]);
+  };
+
+  const moveActivityToDay = (activityId: string, targetDay: DayId) => {
+    const sourceDay = dayIds.find((day) => itinerary[day].includes(activityId));
+    if (!sourceDay || sourceDay === targetDay) {
+      setDraggingActivityId(null);
+      return;
+    }
+    setItinerary((current) => ({
+      ...current,
+      [sourceDay]: current[sourceDay].filter((id) => id !== activityId),
+      [targetDay]: [...current[targetDay].filter((id) => id !== activityId), activityId],
+    }));
+    setActiveDay(targetDay);
+    setDraggingActivityId(null);
+    flashNotice(`Moved to ${targetDay}`);
+  };
+
+  const handleDragStart = (event: React.DragEvent<HTMLDivElement>, activityId: string) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", activityId);
+    setDraggingActivityId(activityId);
+  };
+
+  const handleDayDrop = (event: React.DragEvent<HTMLButtonElement>, day: DayId) => {
+    event.preventDefault();
+    const activityId = event.dataTransfer.getData("text/plain") || draggingActivityId;
+    if (activityId) moveActivityToDay(activityId, day);
+  };
+
   const removeFromDay = (activityId: string, day: DayId) => {
     setItinerary((current) => ({
       ...current,
@@ -374,7 +414,7 @@ export default function Home() {
 
   const resetFilters = () => {
     setActivityQuery("");
-    setCategory("All");
+    setSelectedCategories([]);
     setPriceFilter("All");
   };
 
@@ -385,7 +425,11 @@ export default function Home() {
 
     if (!dayActivities.length) {
       return (
-        <div className="empty-day">
+        <div className="empty-day" onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
+          event.preventDefault();
+          const activityId = event.dataTransfer.getData("text/plain") || draggingActivityId;
+          if (activityId) moveActivityToDay(activityId, day);
+        }}>
           <div className="empty-day-mark"><Compass size={17} strokeWidth={1.7} /></div>
           <p>Nothing planned yet.</p>
           <span>Pick a few things you would love to remember.</span>
@@ -396,13 +440,21 @@ export default function Home() {
     return (
       <div className="day-items">
         {dayActivities.map((activity) => (
-          <div className="day-item" key={activity.id}>
+          <div
+            className={`day-item ${draggingActivityId === activity.id ? "is-dragging" : ""}`}
+            key={activity.id}
+            draggable
+            onDragStart={(event) => handleDragStart(event, activity.id)}
+            onDragEnd={() => setDraggingActivityId(null)}
+            title="Drag to another day"
+          >
             <img src={activity.image} alt="" />
             <div className="day-item-copy">
               <span>{activity.category}</span>
               <strong>{activity.name}</strong>
               <small>{activity.duration} · {formatPrice(activity.price)}</small>
             </div>
+            <GripVertical className="drag-handle" size={15} aria-hidden="true" />
             <button
               className="icon-button subtle"
               aria-label={`Remove ${activity.name}`}
@@ -518,19 +570,19 @@ export default function Home() {
                 <input aria-label="Search activities" value={activityQuery} onChange={(event) => setActivityQuery(event.target.value)} placeholder="Search ideas" />
                 {activityQuery && <button className="clear-search" onClick={() => setActivityQuery("")} aria-label="Clear activity search"><X size={15} /></button>}
               </label>
-              <button className={`filter-toggle ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((current) => !current)}><SlidersHorizontal size={16} /> Filters <span>{(category !== "All" ? 1 : 0) + (priceFilter !== "All" ? 1 : 0)}</span></button>
+              <button className={`filter-toggle ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((current) => !current)}><SlidersHorizontal size={16} /> Filters <span>{selectedCategories.length + (priceFilter !== "All" ? 1 : 0)}</span></button>
             </div>
 
             <div className={`filters-panel ${showFilters ? "open" : ""}`}>
               <div className="filter-group">
-                <div className="filter-label"><Filter size={13} /> Type</div>
-                <div className="filter-options">{categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div>
+                <div className="filter-label"><Filter size={13} /> Type <small>Choose one or more</small></div>
+                <div className="filter-options">{categories.map((item) => <button key={item} className={(item === "All" ? selectedCategories.length === 0 : selectedCategories.includes(item)) ? "active" : ""} onClick={() => toggleCategory(item)}>{item}{item !== "All" && selectedCategories.includes(item) && <Check size={12} />}</button>)}</div>
               </div>
               <div className="filter-group">
                 <div className="filter-label"><Wallet size={13} /> Price</div>
                 <div className="filter-options">{priceFilters.map((item) => <button key={item} className={priceFilter === item ? "active" : ""} onClick={() => setPriceFilter(item)}>{item}</button>)}</div>
               </div>
-              {(category !== "All" || priceFilter !== "All" || activityQuery) && <button className="reset-filters" onClick={resetFilters}>Reset filters <X size={13} /></button>}
+              {(selectedCategories.length > 0 || priceFilter !== "All" || activityQuery) && <button className="reset-filters" onClick={resetFilters}>Reset filters <X size={13} /></button>}
             </div>
 
             {filteredActivities.length ? (
@@ -571,12 +623,12 @@ export default function Home() {
 
           <aside className="itinerary-rail" id="itinerary" aria-label="Your itinerary">
             <div className="rail-topline"><span className="section-kicker">Your trip</span><button className="rail-share" onClick={() => flashNotice("Share link copied")}><Share2 size={14} /> Share</button></div>
-            <div className="rail-title-row"><h2>Kyoto, slowly.</h2><span className="rail-days">3 days</span></div>
+            <div className="rail-title-row"><h2>{destination.name}, slowly.</h2><span className="rail-days">3 days</span></div>
             <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
             <div className="day-tabs" role="tablist" aria-label="Trip days">
-              {dayIds.map((day, index) => <button key={day} className={activeDay === day ? "active" : ""} onClick={() => setActiveDay(day)} role="tab" aria-selected={activeDay === day}><span>0{index + 1}</span>{day.replace(" ", " ")}{itinerary[day].length > 0 && <i>{itinerary[day].length}</i>}</button>)}
+              {dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)} role="tab" aria-selected={activeDay === day}><span>0{index + 1}</span>{day.replace(" ", " ")}{itinerary[day].length > 0 && <i>{itinerary[day].length}</i>}</button>)}
             </div>
-            <div className="selected-day-label"><span>{activeDay}</span><small>{activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small></div>
+            <div className="selected-day-label"><span>{activeDay}</span><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small></div>
             {renderDayItems(activeDay)}
             <div className="rail-tip"><Sparkles size={15} /><span><strong>Leave 20% unplanned.</strong><br />The best moments rarely make the first draft.</span></div>
             <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
@@ -605,7 +657,7 @@ export default function Home() {
           <aside className="mobile-plan-sheet" onClick={(event) => event.stopPropagation()} aria-label="Mobile itinerary">
             <div className="sheet-handle" /><div className="sheet-header"><div><span className="section-kicker">Your trip</span><h2>{destination.name}, slowly.</h2></div><button className="icon-button" onClick={() => setShowMobilePlan(false)} aria-label="Close itinerary"><X size={18} /></button></div>
             <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> activities</div></div>
-            <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={activeDay === day ? "active" : ""} onClick={() => setActiveDay(day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
+            <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
             <div className="selected-day-label"><span>{activeDay}</span><small>Tap an activity to remove it</small></div>{renderDayItems(activeDay)}
             <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
@@ -616,4 +668,3 @@ export default function Home() {
     </div>
   );
 }
-

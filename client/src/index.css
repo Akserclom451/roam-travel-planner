@@ -144,9 +144,11 @@ h1 em { color: #d85d43; font-style: italic; }
 .filters-panel { display: none; grid-template-columns: 1fr 1fr auto; gap: 22px; align-items: end; margin-bottom: 18px; padding: 17px; background: #eef2ea; border: 1px solid #dce4d9; }
 .filters-panel.open { display: grid; animation: reveal 180ms ease-out both; }
 .filter-label { display: flex; align-items: center; gap: 6px; margin-bottom: 9px; color: #758174; }
+.filter-label small { margin-left: auto; color: #99a49a; text-transform: none; letter-spacing: 0; font-size: 9px; font-weight: 600; }
 .filter-options { display: flex; flex-wrap: wrap; gap: 6px; }
-.filter-options button { padding: 7px 9px; background: #f7f8f3; color: #6b776d; font-size: 10px; border: 1px solid transparent; }
+.filter-options button { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; background: #f7f8f3; color: #6b776d; font-size: 10px; border: 1px solid transparent; }
 .filter-options button:hover, .filter-options button.active { background: #fffdf8; border-color: #c4d4c1; color: #2e4838; }
+.filter-options button.active { box-shadow: inset 0 -2px 0 #d85d43; }
 .reset-filters { display: flex; align-items: center; gap: 5px; padding: 7px 0; background: transparent; color: #bd523e; font-size: 10px; white-space: nowrap; }
 .activity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .activity-card { overflow: hidden; border: 1px solid #e2e2d9; background: #fffdf9; cursor: pointer; transition: transform 220ms cubic-bezier(.23,1,.32,1), box-shadow 220ms ease, border-color 220ms ease; animation: rise 420ms var(--stagger) both; }
@@ -193,6 +195,7 @@ h1 em { color: #d85d43; font-style: italic; }
 .day-tabs button { position: relative; padding: 9px 5px; border-bottom: 2px solid transparent; background: transparent; color: #869286; text-align: left; font-size: 10px; }
 .day-tabs button span { display: block; margin-bottom: 4px; color: #a3ada2; font-size: 9px; font-weight: 800; }
 .day-tabs button:hover { color: #4b6351; }
+.day-tabs button.drop-target { border-color: #8eaf91; background: #e1eee0; color: #2c4937; outline: 1px dashed #8eaf91; outline-offset: 2px; }
 .day-tabs button.active { border-color: #d85d43; color: #2c4937; font-weight: 800; }
 .day-tabs button.active span { color: #d85d43; }
 .day-tabs button i { position: absolute; top: 8px; right: 3px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #cfe2cf; color: #3c5d45; font-size: 8px; font-style: normal; }
@@ -204,7 +207,11 @@ h1 em { color: #d85d43; font-style: italic; }
 .empty-day p { margin-top: 9px; color: #526958; font-size: 11px; font-weight: 800; }
 .empty-day span { max-width: 170px; margin-top: 5px; color: #89968a; font-size: 9px; line-height: 1.5; }
 .day-items { display: flex; flex-direction: column; gap: 9px; }
-.day-item { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px; background: rgba(255, 253, 248, 0.76); }
+.day-item { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px; background: rgba(255, 253, 248, 0.76); cursor: grab; transition: opacity 160ms ease, background 160ms ease, transform 160ms ease; }
+.day-item:hover { background: #fffdf8; }
+.day-item:active { cursor: grabbing; }
+.day-item.is-dragging { opacity: 0.5; transform: scale(0.98); }
+.drag-handle { flex: 0 0 auto; color: #a7b2a8; }
 .day-item img { width: 43px; height: 43px; flex: 0 0 auto; object-fit: cover; }
 .day-item-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 .day-item-copy span { color: #b15d48; text-transform: uppercase; letter-spacing: 0.1em; font-size: 7px; font-weight: 800; }
