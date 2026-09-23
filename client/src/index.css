@@ -191,6 +191,24 @@ h1 em { color: #d85d43; font-style: italic; }
 .rail-total strong { display: block; margin-top: 4px; color: #2f4f3b; font-size: 26px; letter-spacing: -0.05em; }
 .rail-count { color: #718172; font-size: 10px; }
 .rail-count span { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 3px; border-radius: 50%; background: #d85d43; color: #fff9ef; font-weight: 800; }
+.budget-card { margin-top: 15px; padding: 12px; border: 1px solid #d8e2d5; background: rgba(255, 253, 248, 0.64); }
+.budget-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #6f7e72; font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800; }
+.budget-heading strong { color: #4b6651; font-size: 9px; letter-spacing: 0; text-transform: none; }
+.budget-card.exceeded { border-color: #e3b3a8; background: #fbefeb; }
+.budget-card.exceeded .budget-heading strong { color: #bd523e; }
+.budget-card.within .budget-heading strong { color: #4d7a58; }
+.budget-input-row { display: flex; align-items: center; gap: 5px; margin-top: 9px; padding: 7px 9px; border: 1px solid #d7e0d4; background: #fffefa; color: #809083; font-size: 12px; }
+.budget-input-row input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: #2f4f3b; font-size: 12px; font-weight: 700; }
+.budget-input-row input::-webkit-inner-spin-button { margin: 0; }
+.budget-meter { height: 5px; margin-top: 10px; overflow: hidden; background: #dce7d9; }
+.budget-meter span { display: block; height: 100%; background: #7fa17f; transition: width 180ms ease, background 180ms ease; }
+.budget-card.exceeded .budget-meter span { background: #d85d43; }
+.budget-card small { display: block; margin-top: 7px; color: #829086; font-size: 9px; line-height: 1.45; }
+.conflict-alert { display: flex; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #e4b7ac; background: #fbefeb; color: #bd523e; }
+.conflict-alert > svg { flex: 0 0 auto; margin-top: 1px; }
+.conflict-alert div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.conflict-alert strong { font-size: 10px; }
+.conflict-alert small { color: #916357; font-size: 9px; line-height: 1.35; }
 .day-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 19px 0 20px; }
 .day-tabs button { position: relative; padding: 9px 5px; border-bottom: 2px solid transparent; background: transparent; color: #869286; text-align: left; font-size: 10px; }
 .day-tabs button span { display: block; margin-bottom: 4px; color: #a3ada2; font-size: 9px; font-weight: 800; }
@@ -201,7 +219,9 @@ h1 em { color: #d85d43; font-style: italic; }
 .day-tabs button i { position: absolute; top: 8px; right: 3px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #cfe2cf; color: #3c5d45; font-size: 8px; font-style: normal; }
 .selected-day-label { align-items: baseline; padding-bottom: 11px; }
 .selected-day-label span { color: #314c3a; font-size: 12px; font-weight: 800; }
+.selected-day-label > div { display: flex; align-items: baseline; gap: 8px; }
 .selected-day-label small { color: #899589; font-size: 9px; }
+.selected-day-label strong { color: #4a6650; font-size: 10px; }
 .empty-day { min-height: 156px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px 15px; border: 1px dashed #cbd8c9; text-align: center; }
 .empty-day-mark { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%; background: #dbe8dc; color: #58745d; }
 .empty-day p { margin-top: 9px; color: #526958; font-size: 11px; font-weight: 800; }
@@ -217,6 +237,11 @@ h1 em { color: #d85d43; font-style: italic; }
 .day-item-copy span { color: #b15d48; text-transform: uppercase; letter-spacing: 0.1em; font-size: 7px; font-weight: 800; }
 .day-item-copy strong { overflow: hidden; color: #394e3e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .day-item-copy small { color: #8a958b; font-size: 9px; }
+.quantity-control { display: flex; align-items: center; gap: 4px; margin-top: 5px; }
+.quantity-control button { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid #d1ddd0; background: #f7faf4; color: #45604c; font-size: 13px; line-height: 1; }
+.quantity-control button:disabled { opacity: 0.35; cursor: not-allowed; }
+.quantity-control > span { min-width: 14px; color: #4b6651; text-align: center; font-size: 9px; font-weight: 800; }
+.conflict-mark { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: #f3d8d0; color: #bd523e; }
 .icon-button.subtle { width: 24px; height: 24px; color: #9ca69d; }
 .icon-button.subtle:hover { background: #f5dfd8; color: #bd523e; }
 .rail-tip { display: flex; gap: 9px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #d5e0d2; color: #7b8d7f; font-size: 9px; line-height: 1.5; }
@@ -322,12 +347,19 @@ h1 em { color: #d85d43; font-style: italic; }
   .sheet-header h2 { margin-top: 5px; font-size: 29px; }
   .sheet-header .icon-button { background: #dfe9de; }
   .mobile-plan-sheet .rail-total { margin-top: 18px; }
+  .mobile-plan-sheet .budget-card { margin-top: 14px; padding: 13px; }
+  .mobile-plan-sheet .budget-input-row { min-height: 42px; }
+  .mobile-plan-sheet .conflict-alert { margin-top: 12px; }
   .mobile-plan-sheet .day-tabs { margin-bottom: 15px; }
   .mobile-plan-sheet .day-tabs button { min-height: 48px; padding: 11px 8px; font-size: 11px; }
   .mobile-plan-sheet .day-tabs button i { width: 18px; height: 18px; }
   .mobile-plan-sheet .empty-day { min-height: 118px; }
   .mobile-plan-sheet .continue-button { margin-top: 17px; }
   .mobile-plan-sheet .icon-button.subtle { width: 40px; height: 40px; }
+  .mobile-plan-sheet .quantity-control { gap: 6px; }
+  .mobile-plan-sheet .quantity-control button { width: 30px; height: 30px; font-size: 16px; }
+  .mobile-plan-sheet .quantity-control > span { min-width: 18px; font-size: 10px; }
+  .mobile-plan-sheet .conflict-mark { width: 30px; height: 30px; }
   .detail-panel { top: auto; width: 100%; height: auto; max-height: 90vh; border-radius: 24px 24px 0 0; animation-name: sheetIn; }
   .detail-image-wrap { height: 210px; }
   .detail-content { padding: 23px 21px 30px; }

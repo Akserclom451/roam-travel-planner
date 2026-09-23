@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   CalendarDays,
   Check,
@@ -40,6 +41,17 @@ type Activity = {
   location: string;
   image: string;
   accent: string;
+};
+
+type PlannedActivity = {
+  activityId: string;
+  quantity: number;
+};
+
+type ActivitySchedule = {
+  startMinutes: number;
+  durationMinutes: number;
+  label: string;
 };
 
 type Destination = {
@@ -282,6 +294,28 @@ const activityData: Record<DestinationId, Activity[]> = {
   ],
 };
 
+const activitySchedules: Record<string, ActivitySchedule> = {
+  "kyoto-tea": { startMinutes: 9 * 60, durationMinutes: 90, label: "09:00" },
+  "kyoto-fushimi": { startMinutes: 10 * 60, durationMinutes: 135, label: "10:00" },
+  "kyoto-nishiki": { startMinutes: 13 * 60, durationMinutes: 120, label: "13:00" },
+  "kyoto-philosopher": { startMinutes: 14 * 60 + 30, durationMinutes: 180, label: "14:30" },
+  "kyoto-ryokan": { startMinutes: 19 * 60, durationMinutes: 105, label: "19:00" },
+  "lisbon-alfama": { startMinutes: 9 * 60, durationMinutes: 120, label: "09:00" },
+  "lisbon-tram": { startMinutes: 10 * 60 + 30, durationMinutes: 180, label: "10:30" },
+  "lisbon-surf": { startMinutes: 8 * 60, durationMinutes: 240, label: "08:00" },
+  "lisbon-tasca": { startMinutes: 19 * 60, durationMinutes: 150, label: "19:00" },
+  "lisbon-tile": { startMinutes: 14 * 60, durationMinutes: 120, label: "14:00" },
+  "reykjavik-lagoon": { startMinutes: 17 * 60, durationMinutes: 150, label: "17:00" },
+  "reykjavik-food": { startMinutes: 19 * 60, durationMinutes: 165, label: "19:00" },
+  "reykjavik-coast": { startMinutes: 10 * 60, durationMinutes: 210, label: "10:00" },
+  "reykjavik-northern": { startMinutes: 21 * 60, durationMinutes: 240, label: "21:00" },
+  "reykjavik-design": { startMinutes: 13 * 60, durationMinutes: 120, label: "13:00" },
+};
+
+function getSchedule(activity: Activity): ActivitySchedule {
+  return activitySchedules[activity.id] ?? { startMinutes: 9 * 60, durationMinutes: 60, label: "09:00" };
+}
+
 const dayIds: DayId[] = ["Day 1", "Day 2", "Day 3"];
 const categories: Category[] = ["All", "Culture", "Food", "Outdoors", "Slow travel"];
 const priceFilters: PriceFilter[] = ["All", "Under $30", "$30–70", "$70+"];
@@ -298,11 +332,12 @@ export default function Home() {
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("All");
   const [activeDay, setActiveDay] = useState<DayId>("Day 1");
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
-  const [itinerary, setItinerary] = useState<Record<DayId, string[]>>({
+  const [itinerary, setItinerary] = useState<Record<DayId, PlannedActivity[]>>({
     "Day 1": [],
     "Day 2": [],
     "Day 3": [],
   });
+  const [budgetInput, setBudgetInput] = useState("");
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [notice, setNotice] = useState("");
@@ -311,11 +346,40 @@ export default function Home() {
   const destination = destinations.find((item) => item.id === selectedDestination) ?? destinations[0];
   const activities = activityData[selectedDestination];
   const selectedActivity = activities.find((activity) => activity.id === selectedActivityId) ?? null;
-  const selectedIds = Object.values(itinerary).flat();
-  const tripActivities = selectedIds
-    .map((id) => activities.find((activity) => activity.id === id))
-    .filter((activity): activity is Activity => Boolean(activity));
-  const totalCost = tripActivities.reduce((sum, activity) => sum + activity.price, 0);
+  const selectedItems = Object.values(itinerary).flat();
+  const selectedIds = selectedItems.map((item) => item.activityId);
+  const daySubtotals = dayIds.reduce<Record<DayId, number>>((totals, day) => {
+    totals[day] = itinerary[day].reduce((sum, item) => {
+      const activity = activities.find((candidate) => candidate.id === item.activityId);
+      return sum + (activity ? activity.price * item.quantity : 0);
+    }, 0);
+    return totals;
+  }, { "Day 1": 0, "Day 2": 0, "Day 3": 0 });
+  const totalCost = Object.values(daySubtotals).reduce((sum, subtotal) => sum + subtotal, 0);
+  const budget = budgetInput.trim() === "" ? null : Math.max(0, Number(budgetInput) || 0);
+  const budgetExceeded = budget !== null && totalCost > budget;
+  const budgetPercent = budget === null || budget === 0 ? (totalCost > 0 ? 100 : 0) : Math.min(100, (totalCost / budget) * 100);
+  const conflictsByDay = dayIds.reduce<Record<DayId, string[]>>((conflicts, day) => {
+    const dayItems = itinerary[day]
+      .map((item) => ({ item, activity: activities.find((candidate) => candidate.id === item.activityId) }))
+      .filter((entry): entry is { item: PlannedActivity; activity: Activity } => Boolean(entry.activity));
+    const ids = new Set<string>();
+    dayItems.forEach((current, index) => {
+      const currentSchedule = getSchedule(current.activity);
+      const currentEnd = currentSchedule.startMinutes + currentSchedule.durationMinutes;
+      dayItems.slice(index + 1).forEach((next) => {
+        const nextSchedule = getSchedule(next.activity);
+        const nextEnd = nextSchedule.startMinutes + nextSchedule.durationMinutes;
+        if (currentSchedule.startMinutes < nextEnd && nextSchedule.startMinutes < currentEnd) {
+          ids.add(current.activity.id);
+          ids.add(next.activity.id);
+        }
+      });
+    });
+    conflicts[day] = Array.from(ids);
+    return conflicts;
+  }, { "Day 1": [], "Day 2": [], "Day 3": [] });
+  const conflictCount = Object.values(conflictsByDay).reduce((sum, ids) => sum + ids.length, 0);
 
   const filteredDestinations = useMemo(() => {
     const query = destinationQuery.trim().toLowerCase();
@@ -354,13 +418,13 @@ export default function Home() {
   };
 
   const addToDay = (activityId: string, day: DayId) => {
-    if (itinerary[day].includes(activityId)) {
+    if (itinerary[day].some((item) => item.activityId === activityId)) {
       flashNotice("Already on this day");
       return;
     }
     setItinerary((current) => ({
       ...current,
-      [day]: [...current[day], activityId],
+      [day]: [...current[day], { activityId, quantity: 1 }],
     }));
     setActiveDay(day);
     flashNotice(`Added to ${day}`);
@@ -377,15 +441,15 @@ export default function Home() {
   };
 
   const moveActivityToDay = (activityId: string, targetDay: DayId) => {
-    const sourceDay = dayIds.find((day) => itinerary[day].includes(activityId));
+    const sourceDay = dayIds.find((day) => itinerary[day].some((item) => item.activityId === activityId));
     if (!sourceDay || sourceDay === targetDay) {
       setDraggingActivityId(null);
       return;
     }
     setItinerary((current) => ({
       ...current,
-      [sourceDay]: current[sourceDay].filter((id) => id !== activityId),
-      [targetDay]: [...current[targetDay].filter((id) => id !== activityId), activityId],
+      [sourceDay]: current[sourceDay].filter((item) => item.activityId !== activityId),
+      [targetDay]: [...current[targetDay].filter((item) => item.activityId !== activityId), current[sourceDay].find((item) => item.activityId === activityId)!],
     }));
     setActiveDay(targetDay);
     setDraggingActivityId(null);
@@ -407,9 +471,18 @@ export default function Home() {
   const removeFromDay = (activityId: string, day: DayId) => {
     setItinerary((current) => ({
       ...current,
-      [day]: current[day].filter((id) => id !== activityId),
+      [day]: current[day].filter((item) => item.activityId !== activityId),
     }));
     flashNotice("Removed from itinerary");
+  };
+
+  const updateQuantity = (activityId: string, day: DayId, delta: number) => {
+    setItinerary((current) => ({
+      ...current,
+      [day]: current[day].map((item) => item.activityId === activityId
+        ? { ...item, quantity: Math.min(5, Math.max(1, item.quantity + delta)) }
+        : item),
+    }));
   };
 
   const resetFilters = () => {
@@ -420,8 +493,8 @@ export default function Home() {
 
   const renderDayItems = (day: DayId) => {
     const dayActivities = itinerary[day]
-      .map((id) => activities.find((activity) => activity.id === id))
-      .filter((activity): activity is Activity => Boolean(activity));
+      .map((item) => ({ item, activity: activities.find((activity) => activity.id === item.activityId) }))
+      .filter((entry): entry is { item: PlannedActivity; activity: Activity } => Boolean(entry.activity));
 
     if (!dayActivities.length) {
       return (
@@ -439,7 +512,9 @@ export default function Home() {
 
     return (
       <div className="day-items">
-        {dayActivities.map((activity) => (
+        {dayActivities.map(({ item, activity }) => {
+          const hasConflict = conflictsByDay[day].includes(activity.id);
+          return (
           <div
             className={`day-item ${draggingActivityId === activity.id ? "is-dragging" : ""}`}
             key={activity.id}
@@ -452,9 +527,15 @@ export default function Home() {
             <div className="day-item-copy">
               <span>{activity.category}</span>
               <strong>{activity.name}</strong>
-              <small>{activity.duration} · {formatPrice(activity.price)}</small>
+              <small>{getSchedule(activity).label} · {activity.duration} · {formatPrice(activity.price * item.quantity)}</small>
+              <div className="quantity-control" aria-label={`Quantity for ${activity.name}`}>
+                <button type="button" onClick={(event) => { event.stopPropagation(); updateQuantity(activity.id, day, -1); }} disabled={item.quantity <= 1} aria-label={`Decrease ${activity.name} quantity`}>−</button>
+                <span>{item.quantity}</span>
+                <button type="button" onClick={(event) => { event.stopPropagation(); updateQuantity(activity.id, day, 1); }} disabled={item.quantity >= 5} aria-label={`Increase ${activity.name} quantity`}>+</button>
+              </div>
             </div>
             <GripVertical className="drag-handle" size={15} aria-hidden="true" />
+            {hasConflict && <span className="conflict-mark" title="Scheduling conflict"><AlertTriangle size={14} /></span>}
             <button
               className="icon-button subtle"
               aria-label={`Remove ${activity.name}`}
@@ -463,7 +544,8 @@ export default function Home() {
               <Trash2 size={14} />
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -625,10 +707,17 @@ export default function Home() {
             <div className="rail-topline"><span className="section-kicker">Your trip</span><button className="rail-share" onClick={() => flashNotice("Share link copied")}><Share2 size={14} /> Share</button></div>
             <div className="rail-title-row"><h2>{destination.name}, slowly.</h2><span className="rail-days">3 days</span></div>
             <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
+              <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
+              <div className="budget-input-row"><span>$</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label="Trip budget" /></div>
+              <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
+              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatPrice(totalCost)} of ${formatPrice(budget)} · ${budgetExceeded ? formatPrice(totalCost - budget) + " over" : formatPrice(budget - totalCost) + " left"}`}</small>
+            </div>
+            {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs" role="tablist" aria-label="Trip days">
               {dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)} role="tab" aria-selected={activeDay === day}><span>0{index + 1}</span>{day.replace(" ", " ")}{itinerary[day].length > 0 && <i>{itinerary[day].length}</i>}</button>)}
             </div>
-            <div className="selected-day-label"><span>{activeDay}</span><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small></div>
+            <div className="selected-day-label"><span>{activeDay}</span><div><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small><strong>{formatPrice(daySubtotals[activeDay])}</strong></div></div>
             {renderDayItems(activeDay)}
             <div className="rail-tip"><Sparkles size={15} /><span><strong>Leave 20% unplanned.</strong><br />The best moments rarely make the first draft.</span></div>
             <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
@@ -644,9 +733,9 @@ export default function Home() {
               <div className="activity-location"><MapPin size={13} /> {selectedActivity.location}</div>
               <h2>{selectedActivity.name}</h2>
               <p className="detail-description">{selectedActivity.details}</p>
-              <div className="detail-facts"><span><Clock3 size={15} /><strong>{selectedActivity.duration}</strong><small>Duration</small></span><span><Wallet size={15} /><strong>{formatPrice(selectedActivity.price)}</strong><small>Per person</small></span></div>
-              <div className="add-section"><span className="add-label">Add to your trip</span><div className="detail-day-picker">{dayIds.map((day) => <button key={day} className={activeDay === day ? "active" : ""} onClick={() => setActiveDay(day)}>{day}<span>{itinerary[day].includes(selectedActivity.id) ? <Check size={14} /> : <Plus size={14} />}</span></button>)}</div><button className="add-primary" onClick={() => addToDay(selectedActivity.id, activeDay)}>{itinerary[activeDay].includes(selectedActivity.id) ? <><Check size={16} /> Added to {activeDay}</> : <>Add to {activeDay} <ArrowRight size={16} /></>}</button></div>
-              {selectedIds.includes(selectedActivity.id) && <p className="detail-note"><Check size={14} /> In your itinerary · {selectedIds.find((id) => itinerary["Day 1"].includes(id)) ? "Day 1" : selectedIds.find((id) => itinerary["Day 2"].includes(id)) ? "Day 2" : "Day 3"}</p>}
+              <div className="detail-facts"><span><Clock3 size={15} /><strong>{getSchedule(selectedActivity).label} · {selectedActivity.duration}</strong><small>Time & duration</small></span><span><Wallet size={15} /><strong>{formatPrice(selectedActivity.price)}</strong><small>Per person</small></span></div>
+              <div className="add-section"><span className="add-label">Add to your trip</span><div className="detail-day-picker">{dayIds.map((day) => <button key={day} className={activeDay === day ? "active" : ""} onClick={() => setActiveDay(day)}>{day}<span>{itinerary[day].some((item) => item.activityId === selectedActivity.id) ? <Check size={14} /> : <Plus size={14} />}</span></button>)}</div><button className="add-primary" onClick={() => addToDay(selectedActivity.id, activeDay)}>{itinerary[activeDay].some((item) => item.activityId === selectedActivity.id) ? <><Check size={16} /> Added to {activeDay}</> : <>Add to {activeDay} <ArrowRight size={16} /></>}</button></div>
+              {selectedIds.includes(selectedActivity.id) && <p className="detail-note"><Check size={14} /> In your itinerary · {dayIds.find((day) => itinerary[day].some((item) => item.activityId === selectedActivity.id))}</p>}
             </div>
           </aside>
         </div>
@@ -656,9 +745,16 @@ export default function Home() {
         <div className="mobile-plan-overlay" onClick={() => setShowMobilePlan(false)}>
           <aside className="mobile-plan-sheet" onClick={(event) => event.stopPropagation()} aria-label="Mobile itinerary">
             <div className="sheet-handle" /><div className="sheet-header"><div><span className="section-kicker">Your trip</span><h2>{destination.name}, slowly.</h2></div><button className="icon-button" onClick={() => setShowMobilePlan(false)} aria-label="Close itinerary"><X size={18} /></button></div>
-            <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> activities</div></div>
+            <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
+              <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
+              <div className="budget-input-row"><span>$</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label="Trip budget" /></div>
+              <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
+              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatPrice(totalCost)} of ${formatPrice(budget)} · ${budgetExceeded ? formatPrice(totalCost - budget) + " over" : formatPrice(budget - totalCost) + " left"}`}</small>
+            </div>
+            {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
-            <div className="selected-day-label"><span>{activeDay}</span><small>Tap an activity to remove it</small></div>{renderDayItems(activeDay)}
+            <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatPrice(daySubtotals[activeDay])}</strong></div></div>{renderDayItems(activeDay)}
             <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </div>
