@@ -142,7 +142,7 @@ h1 em { color: #d85d43; font-style: italic; }
 .filter-toggle:hover, .filter-toggle.active { background: #e4ede2; border-color: #cbd8c9; }
 .filter-toggle span { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 50%; background: #d85d43; color: #fffaf4; font-size: 9px; }
 .filters-panel { display: none; grid-template-columns: 1fr 1fr auto; gap: 22px; align-items: end; margin-bottom: 18px; padding: 17px; background: #eef2ea; border: 1px solid #dce4d9; }
-.filters-panel.open { display: grid; animation: reveal 180ms ease-out both; }
+.filters-panel.open { display: grid; animation: none; }
 .filter-label { display: flex; align-items: center; gap: 6px; margin-bottom: 9px; color: #758174; }
 .filter-label small { margin-left: auto; color: #99a49a; text-transform: none; letter-spacing: 0; font-size: 9px; font-weight: 600; }
 .filter-options { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -325,7 +325,7 @@ h1 em { color: #d85d43; font-style: italic; }
   .planning-layout { display: block; padding: 0; }
   .section-heading-row h2 { font-size: 32px; }
   .result-count { padding-bottom: 3px; }
-  .filters-panel.open { display: block; padding: 16px; }
+  .filters-panel.open { display: block; padding: 16px; animation: none; }
   .filter-group + .filter-group { margin-top: 16px; }
   .filter-options { gap: 8px; }
   .filter-options button { min-height: 40px; padding: 9px 12px; font-size: 11px; }
@@ -355,7 +355,9 @@ h1 em { color: #d85d43; font-style: italic; }
   .mobile-plan-sheet .day-tabs button i { width: 18px; height: 18px; }
   .mobile-plan-sheet .empty-day { min-height: 118px; }
   .mobile-plan-sheet .continue-button { margin-top: 17px; }
-  .mobile-plan-sheet .icon-button.subtle { width: 40px; height: 40px; }
+  .mobile-plan-sheet .day-item { align-items: flex-start; gap: 10px; padding: 10px 8px; }
+  .mobile-plan-sheet .day-item-copy { padding-right: 8px; }
+  .mobile-plan-sheet .icon-button.subtle { width: 40px; height: 40px; margin-left: 5px; flex: 0 0 auto; background: #f5dfd8; color: #bd523e; }
   .mobile-plan-sheet .quantity-control { gap: 6px; }
   .mobile-plan-sheet .quantity-control button { width: 30px; height: 30px; font-size: 16px; }
   .mobile-plan-sheet .quantity-control > span { min-width: 18px; font-size: 10px; }
