@@ -35,6 +35,16 @@ type Currency = {
   symbol: string;
 };
 
+type CheckoutStep = "review" | "payment" | "processing" | "success" | "failure";
+
+type PaymentForm = {
+  name: string;
+  cardNumber: string;
+  expiry: string;
+  securityCode: string;
+  forceFailure: boolean;
+};
+
 type Activity = {
   id: string;
   name: string;
@@ -358,13 +368,21 @@ export default function Home() {
   const [showFilters, setShowFilters] = useState(false);
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
+  const [checkoutStep, setCheckoutStep] = useState<CheckoutStep | null>(null);
+  const [paymentForm, setPaymentForm] = useState<PaymentForm>({ name: "", cardNumber: "", expiry: "", securityCode: "", forceFailure: false });
+  const [paymentError, setPaymentError] = useState("");
+  const [orderReference, setOrderReference] = useState("");
   const noticeTimer = useRef<number | null>(null);
+  const paymentTimer = useRef<number | null>(null);
 
   const destination = destinations.find((item) => item.id === selectedDestination) ?? destinations[0];
   const activities = activityData[selectedDestination];
   const selectedActivity = activities.find((activity) => activity.id === selectedActivityId) ?? null;
   const selectedItems = useMemo(() => Object.values(itinerary).flat(), [itinerary]);
   const selectedIds = useMemo(() => selectedItems.map((item) => item.activityId), [selectedItems]);
+  const checkoutItems = useMemo(() => dayIds.flatMap((day) => itinerary[day]
+    .map((item) => ({ day, item, activity: activities.find((candidate) => candidate.id === item.activityId) }))
+    .filter((entry): entry is { day: DayId; item: PlannedActivity; activity: Activity } => Boolean(entry.activity))), [activities, itinerary]);
   const daySubtotals = useMemo(() => dayIds.reduce<Record<DayId, number>>((totals, day) => {
     totals[day] = itinerary[day].reduce((sum, item) => {
       const activity = activities.find((candidate) => candidate.id === item.activityId);
@@ -428,13 +446,17 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!selectedActivityId && !showMobilePlan) return;
+    if (!selectedActivityId && !showMobilePlan && !checkoutStep) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedActivityId, showMobilePlan]);
+  }, [selectedActivityId, showMobilePlan, checkoutStep]);
+
+  useEffect(() => () => {
+    if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
+  }, []);
 
   const switchDestination = (id: DestinationId) => {
     const previousDestination = destination.name;
@@ -446,6 +468,7 @@ export default function Home() {
     setSelectedCategories([]);
     setPriceFilter("All");
     setSelectedActivityId(null);
+    setCheckoutStep(null);
     setItinerary({ "Day 1": [], "Day 2": [], "Day 3": [] });
     flashNotice(hadItinerary ? `${previousDestination} itinerary cleared · Now planning ${nextDestination}` : `Now planning ${nextDestination}`);
   };
@@ -522,6 +545,58 @@ export default function Home() {
     setActivityQuery("");
     setSelectedCategories([]);
     setPriceFilter("All");
+  };
+
+  const openCheckout = () => {
+    if (checkoutItems.length === 0) {
+      flashNotice("Add at least one activity before checkout");
+      return;
+    }
+    setShowMobilePlan(false);
+    setSelectedActivityId(null);
+    setPaymentError("");
+    setCheckoutStep("review");
+  };
+
+  const updatePaymentField = (field: keyof PaymentForm, value: string | boolean) => {
+    setPaymentForm((current) => ({ ...current, [field]: value }));
+    if (paymentError) setPaymentError("");
+  };
+
+  const validatePayment = () => {
+    const digits = paymentForm.cardNumber.replace(/\s/g, "");
+    if (paymentForm.name.trim().length < 2) return "Enter the name on this test card.";
+    if (!/^\d{16}$/.test(digits)) return "Enter a 16-digit test card number.";
+    if (!/^(0[1-9]|1[0-2])\/?(2[6-9]|[3-9]\d)$/.test(paymentForm.expiry.trim())) return "Use a valid expiry in MM/YY format.";
+    if (!/^\d{3,4}$/.test(paymentForm.securityCode.trim())) return "Enter a 3 or 4 digit security code.";
+    return "";
+  };
+
+  const submitPayment = () => {
+    if (checkoutStep !== "payment" || paymentTimer.current !== null) return;
+    const validationError = validatePayment();
+    if (validationError) {
+      setPaymentError(validationError);
+      return;
+    }
+    setPaymentError("");
+    setCheckoutStep("processing");
+    paymentTimer.current = window.setTimeout(() => {
+      paymentTimer.current = null;
+      if (paymentForm.forceFailure) {
+        setCheckoutStep("failure");
+        setPaymentError("This test-only failure was requested. No payment was sent or stored.");
+        return;
+      }
+      setOrderReference(`ROAM-${Date.now().toString(36).toUpperCase().slice(-6)}`);
+      setCheckoutStep("success");
+    }, 1400);
+  };
+
+  const returnToItinerary = () => {
+    setCheckoutStep(null);
+    setPaymentError("");
+    setShowMobilePlan(false);
   };
 
   const renderDayItems = (day: DayId) => {
@@ -753,6 +828,7 @@ export default function Home() {
             <div className="selected-day-label"><span>{activeDay}</span><div><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>
             {renderDayItems(activeDay)}
             <div className="rail-tip"><Sparkles size={15} /><span><strong>Leave 20% unplanned.</strong><br />The best moments rarely make the first draft.</span></div>
+            <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & mock pay <ArrowRight size={15} /></button>
             <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </section>
@@ -788,8 +864,72 @@ export default function Home() {
             {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
             <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>{renderDayItems(activeDay)}
+            <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & mock pay <ArrowRight size={15} /></button>
             <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
+        </div>
+      )}
+
+      {checkoutStep && (
+        <div className="checkout-overlay" role="dialog" aria-modal="true" aria-label="ROAM mock checkout">
+          <section className="checkout-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="checkout-header">
+              <div>
+                <span className="section-kicker">ROAM mock checkout · {destination.currency.code}</span>
+                <h2>{checkoutStep === "review" ? "Review your slow days." : checkoutStep === "payment" ? "A small step to go." : checkoutStep === "processing" ? "Taking a moment." : checkoutStep === "success" ? "Your plan is held." : "No payment was completed."}</h2>
+                <p>{checkoutStep === "review" ? "Check the details before entering fictional test payment information." : checkoutStep === "payment" ? "This is a prototype payment form. Nothing is sent or stored." : checkoutStep === "processing" ? "We are simulating a secure payment check." : checkoutStep === "success" ? "Your mock payment was accepted for this prototype." : "Your itinerary is unchanged and ready to try again."}</p>
+              </div>
+              <button className="icon-button" onClick={returnToItinerary} aria-label="Return to itinerary"><X size={18} /></button>
+            </div>
+
+            <div className="checkout-progress" aria-label="Checkout progress">
+              {(["review", "payment", "processing", "result"] as const).map((step, index) => <span key={step} className={`${checkoutStep === step || (step === "result" && (checkoutStep === "success" || checkoutStep === "failure")) ? "active" : ""} ${index < (["review", "payment", "processing", "success", "failure"].indexOf(checkoutStep)) ? "complete" : ""}`}><i>{index + 1}</i>{step === "result" ? "Result" : step[0].toUpperCase() + step.slice(1)}</span>)}
+            </div>
+
+            {checkoutStep === "review" && (
+              <div className="checkout-body">
+                <div className="checkout-destination"><img src={destination.image} alt="" /><div><span>Destination</span><strong>{destination.name}, {destination.country}</strong><small>Three unhurried days · {destination.currency.code}</small></div></div>
+                <div className="checkout-section-heading"><span>Selected activities</span><small>{checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</small></div>
+                <div className="checkout-items">
+                  {dayIds.map((day) => {
+                    const dayItems = checkoutItems.filter((entry) => entry.day === day);
+                    if (!dayItems.length) return null;
+                    return <div className="checkout-day" key={day}><div className="checkout-day-heading"><strong>{day}</strong><span>{formatPrice(daySubtotals[day], destination.currency)}</span></div>{dayItems.map(({ item, activity }) => <div className="checkout-item" key={`${day}-${activity.id}`}><img src={activity.image} alt="" /><div><strong>{activity.name}</strong><small>{item.quantity} × {formatPrice(activity.price, destination.currency)} · {activity.duration}</small></div><b>{formatPrice(activity.price * item.quantity, destination.currency)}</b></div>)}</div>;
+                  })}
+                </div>
+                <div className="checkout-total"><span>Final amount</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div>
+                <div className="checkout-actions"><button className="checkout-secondary" onClick={returnToItinerary}>Edit itinerary</button><button className="checkout-primary" onClick={() => setCheckoutStep("payment")}>Continue to payment <ArrowRight size={16} /></button></div>
+              </div>
+            )}
+
+            {checkoutStep === "payment" && (
+              <form className="checkout-body payment-body" onSubmit={(event) => { event.preventDefault(); submitPayment(); }}>
+                <div className="payment-total"><div><span>Paying for</span><strong>{destination.name} itinerary</strong></div><b>{formatPrice(totalCost, destination.currency)}</b></div>
+                <div className="mock-payment-note"><Wallet size={16} /><span>Test mode only · no payment provider connected · card data never leaves this page.</span></div>
+                <div className="payment-grid">
+                  <label className="payment-field payment-field-wide"><span>Name on test card</span><input value={paymentForm.name} onChange={(event) => updatePaymentField("name", event.target.value)} placeholder="Avery Wander" autoComplete="off" /></label>
+                  <label className="payment-field payment-field-wide"><span>Card number</span><input inputMode="numeric" value={paymentForm.cardNumber} onChange={(event) => updatePaymentField("cardNumber", event.target.value)} placeholder="4242 4242 4242 4242" autoComplete="off" /></label>
+                  <label className="payment-field"><span>Expiry</span><input inputMode="numeric" value={paymentForm.expiry} onChange={(event) => updatePaymentField("expiry", event.target.value)} placeholder="MM/YY" autoComplete="off" /></label>
+                  <label className="payment-field"><span>Security code</span><input inputMode="numeric" value={paymentForm.securityCode} onChange={(event) => updatePaymentField("securityCode", event.target.value)} placeholder="123" autoComplete="off" /></label>
+                </div>
+                <label className="failure-toggle"><input type="checkbox" checked={paymentForm.forceFailure} onChange={(event) => updatePaymentField("forceFailure", event.target.checked)} /><span><strong>Test failure path</strong><small>Deterministically simulate a declined mock payment.</small></span></label>
+                {paymentError && <div className="payment-error" role="alert"><AlertTriangle size={15} /><span>{paymentError}</span></div>}
+                <div className="checkout-actions"><button type="button" className="checkout-secondary" onClick={() => { setPaymentError(""); setCheckoutStep("review"); }}>Back to review</button><button type="submit" className="checkout-primary">Pay {formatPrice(totalCost, destination.currency)} <ArrowRight size={16} /></button></div>
+              </form>
+            )}
+
+            {checkoutStep === "processing" && (
+              <div className="checkout-body checkout-processing" aria-live="polite"><div className="processing-spinner"><Wallet size={21} /></div><h3>Checking your test payment</h3><p>One intentional pause while ROAM simulates the payment result.</p><span className="processing-bar"><i /></span></div>
+            )}
+
+            {checkoutStep === "success" && (
+              <div className="checkout-body checkout-result"><div className="result-mark success-mark"><Check size={27} /></div><span className="result-kicker">Mock payment successful</span><h3>Keep this plan close.</h3><p>No real charge or external booking was made. Your itinerary remains available to edit.</p><div className="confirmation-meta"><span><small>Test reference</small><strong>{orderReference}</strong></span><span><small>Final amount</small><strong>{formatPrice(totalCost, destination.currency)}</strong></span></div><div className="confirmation-list">{checkoutItems.map(({ day, item, activity }) => <div key={`${day}-${activity.id}`}><span>{day}</span><strong>{activity.name} × {item.quantity}</strong></div>)}</div><div className="checkout-actions"><button className="checkout-secondary" onClick={returnToItinerary}>Return to itinerary</button><button className="checkout-primary" onClick={() => { setCheckoutStep(null); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Continue exploring <ArrowRight size={16} /></button></div></div>
+            )}
+
+            {checkoutStep === "failure" && (
+              <div className="checkout-body checkout-result"><div className="result-mark failure-mark"><AlertTriangle size={27} /></div><span className="result-kicker">Mock payment not completed</span><h3>Nothing was charged.</h3><p>{paymentError || "This prototype declined the requested test payment."}</p><div className="failure-preserved"><Check size={15} /> Your itinerary and quantities are still intact.</div><div className="checkout-actions"><button className="checkout-secondary" onClick={returnToItinerary}>Edit itinerary</button><button className="checkout-primary" onClick={() => { setPaymentError(""); setCheckoutStep("payment"); }}>Retry payment <ArrowRight size={16} /></button></div></div>
+            )}
+          </section>
         </div>
       )}
 
