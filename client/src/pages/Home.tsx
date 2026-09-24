@@ -16,7 +16,6 @@ import {
   Navigation,
   Plus,
   Search,
-  Share2,
   SlidersHorizontal,
   Sparkles,
   Trash2,
@@ -33,6 +32,16 @@ type PriceFilter = "All" | "under30" | "30to70" | "over70";
 type Currency = {
   code: string;
   symbol: string;
+};
+
+type CurrencyCode = "JPY" | "EUR" | "ISK";
+
+type SavedPlan = {
+  id: string;
+  destinationId: DestinationId;
+  itinerary: Record<DayId, PlannedActivity[]>;
+  budgetInput: string;
+  createdAt: number;
 };
 
 type CheckoutStep = "review" | "payment" | "processing" | "success" | "failure";
@@ -338,6 +347,12 @@ function getSchedule(activity: Activity): ActivitySchedule {
 const dayIds: DayId[] = ["Day 1", "Day 2", "Day 3"];
 const categories: Category[] = ["All", "Culture", "Food", "Outdoors", "Slow travel"];
 const priceFilters: PriceFilter[] = ["All", "under30", "30to70", "over70"];
+const currencies: Record<CurrencyCode, Currency> = {
+  JPY: { code: "JPY", symbol: "¥" },
+  EUR: { code: "EUR", symbol: "€" },
+  ISK: { code: "ISK", symbol: "kr" },
+};
+const currencyOptions: CurrencyCode[] = ["JPY", "EUR", "ISK"];
 
 function formatPrice(price: number, currency: Currency) {
   return currency.code === "ISK" ? `${currency.symbol} ${price}` : `${currency.symbol}${price}`;
@@ -353,6 +368,7 @@ function getPriceFilterLabel(filter: PriceFilter, currency: Currency) {
 export default function Home() {
   const { theme, toggleTheme } = useTheme();
   const [selectedDestination, setSelectedDestination] = useState<DestinationId>("kyoto");
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>("JPY");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activityQuery, setActivityQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Exclude<Category, "All">[]>([]);
@@ -368,8 +384,17 @@ export default function Home() {
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showSavedPlans, setShowSavedPlans] = useState(false);
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      return JSON.parse(localStorage.getItem("roam-saved-plans") || "[]") as SavedPlan[];
+    } catch {
+      return [];
+    }
+  });
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [reduceMotion, setReduceMotion] = useState(() => typeof window !== "undefined" && localStorage.getItem("roam-reduce-motion") === "true");
+  const [reduceMotion, setReduceMotion] = useState(() => typeof window !== "undefined" && (localStorage.getItem("roam-reduce-motion") === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches));
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep | null>(null);
@@ -380,7 +405,8 @@ export default function Home() {
   const noticeTimer = useRef<number | null>(null);
   const paymentTimer = useRef<number | null>(null);
 
-  const destination = destinations.find((item) => item.id === selectedDestination) ?? destinations[0];
+  const selectedCurrency = currencies[currencyCode];
+  const destination = { ...(destinations.find((item) => item.id === selectedDestination) ?? destinations[0]), currency: selectedCurrency };
   const activities = activityData[selectedDestination];
   const selectedActivity = activities.find((activity) => activity.id === selectedActivityId) ?? null;
   const selectedItems = useMemo(() => Object.values(itinerary).flat(), [itinerary]);
@@ -420,6 +446,7 @@ export default function Home() {
     return conflicts;
   }, { "Day 1": [], "Day 2": [], "Day 3": [] }), [activities, itinerary]);
   const conflictCount = Object.values(conflictsByDay).reduce((sum, ids) => sum + ids.length, 0);
+  const isPlanSaved = useMemo(() => savedPlans.some((plan) => plan.destinationId === selectedDestination && plan.budgetInput === budgetInput && JSON.stringify(plan.itinerary) === JSON.stringify(itinerary)), [budgetInput, itinerary, savedPlans, selectedDestination]);
 
   const filteredDestinations = useMemo(() => {
     const query = destinationQuery.trim().toLowerCase();
@@ -465,6 +492,10 @@ export default function Home() {
   }, [reduceMotion]);
 
   useEffect(() => {
+    localStorage.setItem("roam-saved-plans", JSON.stringify(savedPlans));
+  }, [savedPlans]);
+
+  useEffect(() => {
     if (!showMenu && !showResetConfirm) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -484,7 +515,9 @@ export default function Home() {
     const previousDestination = destination.name;
     const hadItinerary = selectedIds.length > 0;
     const nextDestination = destinations.find((item) => item.id === id)?.name ?? "your destination";
+    const nextCurrency = destinations.find((item) => item.id === id)?.currency.code as CurrencyCode | undefined;
     setSelectedDestination(id);
+    if (nextCurrency) setCurrencyCode(nextCurrency);
     setDestinationQuery("");
     setActivityQuery("");
     setSelectedCategories([]);
@@ -493,6 +526,39 @@ export default function Home() {
     setCheckoutStep(null);
     setItinerary({ "Day 1": [], "Day 2": [], "Day 3": [] });
     flashNotice(hadItinerary ? `${previousDestination} itinerary cleared · Now planning ${nextDestination}` : `Now planning ${nextDestination}`);
+  };
+
+  const saveCurrentPlan = () => {
+    if (selectedIds.length === 0) {
+      flashNotice("Add an activity before saving this plan");
+      return;
+    }
+    const plan: SavedPlan = {
+      id: `plan-${Date.now()}`,
+      destinationId: selectedDestination,
+      itinerary: JSON.parse(JSON.stringify(itinerary)) as Record<DayId, PlannedActivity[]>,
+      budgetInput,
+      createdAt: Date.now(),
+    };
+    setSavedPlans((current) => [plan, ...current.filter((item) => !(item.destinationId === selectedDestination && item.budgetInput === budgetInput && JSON.stringify(item.itinerary) === JSON.stringify(itinerary)))].slice(0, 12));
+    flashNotice(isPlanSaved ? "Plan already saved" : "Plan saved locally");
+  };
+
+  const loadSavedPlan = (plan: SavedPlan) => {
+    const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0];
+    setSelectedDestination(savedDestination.id);
+    setCurrencyCode(savedDestination.currency.code as CurrencyCode);
+    setItinerary(JSON.parse(JSON.stringify(plan.itinerary)) as Record<DayId, PlannedActivity[]>);
+    setBudgetInput(plan.budgetInput);
+    setActiveDay("Day 1");
+    setShowSavedPlans(false);
+    closeMenu();
+    flashNotice(`${savedDestination.name} plan reopened`);
+  };
+
+  const deleteSavedPlan = (id: string) => {
+    setSavedPlans((current) => current.filter((plan) => plan.id !== id));
+    flashNotice("Saved plan deleted");
   };
 
   const addToDay = (activityId: string, day: DayId) => {
@@ -715,8 +781,7 @@ export default function Home() {
             <a href="#itinerary">My itinerary <span className="nav-count">{selectedIds.length}</span></a>
           </nav>
           <div className="topbar-actions">
-            <button className="nav-action desktop-only" aria-label="Share itinerary" onClick={() => flashNotice("Share link copied") }><Share2 size={16} /></button>
-            <button ref={menuTriggerRef} className="nav-action mobile-only" aria-label="Open menu" aria-expanded={showMenu} onClick={() => setShowMenu(true)}><Menu size={19} /></button>
+            <button ref={menuTriggerRef} className="nav-action options-trigger" aria-label="Open options" aria-expanded={showMenu} onClick={() => setShowMenu(true)}><span className="options-trigger-label">Options</span><Menu size={17} /></button>
           </div>
         </div>
       </header>
@@ -774,12 +839,12 @@ export default function Home() {
           <div className="banner-content">
             <div>
               <span className="banner-kicker">Now planning</span>
-              <h2>{destination.name}<span>, {destination.country}</span></h2>
+              <h2>{destination.name}<span className="banner-country">, {destination.country}</span></h2>
               <p>{destination.note}</p>
             </div>
             <div className="banner-meta"><CalendarDays size={15} /> 3 days <span>·</span> {activities.length} ideas</div>
           </div>
-          <button className="banner-save" onClick={() => flashNotice("Destination saved to your list")}><Heart size={16} /> Save</button>
+          <button className={`banner-save ${isPlanSaved ? "is-saved" : ""}`} onClick={saveCurrentPlan}><Heart size={16} fill={isPlanSaved ? "currentColor" : "none"} /> {isPlanSaved ? "Saved" : "Save plan"}</button>
         </section>
 
         <div className="mobile-summary-bar">
@@ -837,7 +902,7 @@ export default function Home() {
                         <img src={activity.image} alt="" className="activity-image" />
                         <span className="activity-category">{activity.category}</span>
                         {isAdded && <span className="added-badge"><Check size={12} /> Planned</span>}
-                        <button className="card-heart" aria-label={`Save ${activity.name}`} onClick={(event) => { event.stopPropagation(); flashNotice("Saved for later"); }}><Heart size={16} /></button>
+                        <button className="card-heart" aria-label={`Save current plan with ${activity.name}`} onClick={(event) => { event.stopPropagation(); saveCurrentPlan(); }}><Heart size={16} fill={isPlanSaved ? "currentColor" : "none"} /></button>
                       </div>
                       <div className="activity-card-body">
                         <div className="activity-location"><MapPin size={12} /> {activity.location}</div>
@@ -855,7 +920,7 @@ export default function Home() {
           </div>
 
           <aside className="itinerary-rail" id="itinerary" aria-label="Your itinerary">
-            <div className="rail-topline"><span className="section-kicker">Your trip</span><button className="rail-share" onClick={() => flashNotice("Share link copied")}><Share2 size={14} /> Share</button></div>
+            <div className="rail-topline"><span className="section-kicker">Your trip</span><span className="rail-private-note">Private plan</span></div>
             <div className="rail-title-row"><h2>{destination.name}, slowly.</h2><span className="rail-days">3 days</span></div>
             <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
             <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
@@ -897,14 +962,16 @@ export default function Home() {
             <nav className="menu-nav" aria-label="ROAM menu">
               <button onClick={() => scrollToSection("destination-picker")}><span>01</span><strong>Destinations</strong><ArrowRight size={16} /></button>
               <button onClick={() => scrollToSection("explore")}><span>02</span><strong>Curated activities</strong><ArrowRight size={16} /></button>
-              <button onClick={() => { closeMenu(); setShowMobilePlan(true); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
+              <button onClick={() => { closeMenu(); if (window.matchMedia("(max-width: 760px)").matches) setShowMobilePlan(true); else window.setTimeout(() => document.getElementById("itinerary")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" }), 170); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
+              <button className="menu-saved" onClick={() => setShowSavedPlans((current) => !current)}><span>04</span><strong>Saved Plans ({savedPlans.length})</strong><ChevronDown size={15} className={showSavedPlans ? "rotated" : ""} /></button>
             </nav>
+            {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => loadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
             <div className="menu-settings">
-              <div className="menu-setting"><span>04</span><strong>Currency</strong><b>{destination.currency.code} ({destination.currency.symbol})</b></div>
-              <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>05</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
-              <button className={`menu-setting menu-toggle ${reduceMotion ? "active" : ""}`} onClick={() => setReduceMotion((current) => !current)}><span>06</span><strong>Reduce motion</strong><b>{reduceMotion ? "On" : "Off"}</b></button>
+              <button className="menu-setting currency-control" onClick={() => setCurrencyCode(currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length])}><span>05</span><strong>Currency</strong><b>{selectedCurrency.code} ({selectedCurrency.symbol})</b></button>
+              <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>06</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
+              <button className={`menu-setting menu-toggle ${reduceMotion ? "active" : ""}`} onClick={() => setReduceMotion((current) => !current)}><span>07</span><strong>Reduce motion</strong><b>{reduceMotion ? "On" : "Off"}</b></button>
             </div>
-            <button className="menu-reset" onClick={() => { closeMenu(); setShowResetConfirm(true); }}><span>07</span><strong>Reset plan</strong><Trash2 size={15} /></button>
+            <button className="menu-reset" onClick={() => { closeMenu(); setShowResetConfirm(true); }}><span>08</span><strong>Reset plan</strong><Trash2 size={15} /></button>
           </aside>
         </div>
       )}
