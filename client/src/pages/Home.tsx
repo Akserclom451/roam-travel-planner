@@ -20,10 +20,10 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
-  UserRound,
   Wallet,
   X,
 } from "lucide-react";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type DestinationId = "kyoto" | "lisbon" | "reykjavik";
 type DayId = "Day 1" | "Day 2" | "Day 3";
@@ -351,6 +351,7 @@ function getPriceFilterLabel(filter: PriceFilter, currency: Currency) {
 }
 
 export default function Home() {
+  const { theme, toggleTheme } = useTheme();
   const [selectedDestination, setSelectedDestination] = useState<DestinationId>("kyoto");
   const [destinationQuery, setDestinationQuery] = useState("");
   const [activityQuery, setActivityQuery] = useState("");
@@ -366,12 +367,16 @@ export default function Home() {
   const [budgetInput, setBudgetInput] = useState("");
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(() => typeof window !== "undefined" && localStorage.getItem("roam-reduce-motion") === "true");
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep | null>(null);
   const [paymentForm, setPaymentForm] = useState<PaymentForm>({ name: "", cardNumber: "", expiry: "", securityCode: "", forceFailure: false });
   const [paymentError, setPaymentError] = useState("");
   const [orderReference, setOrderReference] = useState("");
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const noticeTimer = useRef<number | null>(null);
   const paymentTimer = useRef<number | null>(null);
 
@@ -446,13 +451,30 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!selectedActivityId && !showMobilePlan && !checkoutStep) return;
+    if (!selectedActivityId && !showMobilePlan && !checkoutStep && !showMenu && !showResetConfirm) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedActivityId, showMobilePlan, checkoutStep]);
+  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, showResetConfirm]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("reduce-motion", reduceMotion);
+    localStorage.setItem("roam-reduce-motion", String(reduceMotion));
+  }, [reduceMotion]);
+
+  useEffect(() => {
+    if (!showMenu && !showResetConfirm) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowMenu(false);
+        setShowResetConfirm(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showMenu, showResetConfirm]);
 
   useEffect(() => () => {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
@@ -599,6 +621,28 @@ export default function Home() {
     setShowMobilePlan(false);
   };
 
+  const closeMenu = () => {
+    setShowMenu(false);
+    window.setTimeout(() => menuTriggerRef.current?.focus(), reduceMotion ? 0 : 180);
+  };
+
+  const scrollToSection = (id: string) => {
+    closeMenu();
+    window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" }), 170);
+  };
+
+  const resetPlan = () => {
+    setItinerary({ "Day 1": [], "Day 2": [], "Day 3": [] });
+    setBudgetInput("");
+    setActiveDay("Day 1");
+    setSelectedActivityId(null);
+    setShowMobilePlan(false);
+    setCheckoutStep(null);
+    setShowResetConfirm(false);
+    closeMenu();
+    flashNotice("Plan reset · Start with a fresh day");
+  };
+
   const renderDayItems = (day: DayId) => {
     const dayActivities = itinerary[day]
       .map((item) => ({ item, activity: activities.find((activity) => activity.id === item.activityId) }))
@@ -672,8 +716,7 @@ export default function Home() {
           </nav>
           <div className="topbar-actions">
             <button className="nav-action desktop-only" aria-label="Share itinerary" onClick={() => flashNotice("Share link copied") }><Share2 size={16} /></button>
-            <button className="nav-action desktop-only" aria-label="Profile"><UserRound size={17} /></button>
-            <button className="nav-action mobile-only" aria-label="Open menu"><Menu size={19} /></button>
+            <button ref={menuTriggerRef} className="nav-action mobile-only" aria-label="Open menu" aria-expanded={showMenu} onClick={() => setShowMenu(true)}><Menu size={19} /></button>
           </div>
         </div>
       </header>
@@ -683,7 +726,7 @@ export default function Home() {
           <div className="intro-copy">
             <div className="eyebrow"><Sparkles size={14} /> Trip planning, with room to wander</div>
             <h1 id="page-title">Make space for<br /><em>the good stuff.</em></h1>
-            <p className="intro-text">Build a trip that feels like you. Start with a place, then follow the things that make you curious.</p>
+            <p className="intro-text">Choose a destination, collect the experiences that fit, and shape them into three unhurried days.</p>
           </div>
           <div className="intro-side-note">
             <span className="side-note-line" />
@@ -691,7 +734,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="destination-picker" aria-label="Choose a destination">
+        <section className="destination-picker" id="destination-picker" aria-label="Choose a destination">
           <div className="picker-label"><Compass size={15} /> Where are you going?</div>
           <div className="destination-search-wrap">
             <Search size={20} />
@@ -832,7 +875,50 @@ export default function Home() {
             <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </section>
+        <section className="journey-section" id="how-it-works" aria-labelledby="journey-title">
+          <div className="journey-heading">
+            <span className="section-kicker">A gentler way to plan</span>
+            <h2 id="journey-title">From a first idea<br /><em>to a trip with shape.</em></h2>
+            <p>ROAM keeps the early wandering and the practical details in the same place, so your itinerary can become coherent without becoming crowded.</p>
+          </div>
+          <div className="journey-steps">
+            <div className="journey-step"><span>01</span><strong>Choose a place</strong><p>Start with a destination and a pace that feels right.</p></div>
+            <div className="journey-step"><span>02</span><strong>Make time for what fits</strong><p>Collect curated experiences, then give each one a day.</p></div>
+            <div className="journey-step"><span>03</span><strong>Keep the good parts</strong><p>Review the shape of the trip before you head out.</p></div>
+          </div>
+          <button className="journey-cta" onClick={() => scrollToSection("top")}>Start with a destination <ArrowRight size={16} /></button>
+        </section>
       </main>
+
+      {showMenu && (
+        <div className="menu-overlay" onClick={closeMenu}>
+          <aside className="menu-panel" role="dialog" aria-modal="true" aria-labelledby="menu-title" onClick={(event) => event.stopPropagation()}>
+            <div className="menu-header"><div><span className="section-kicker">ROAM / Options</span><h2 id="menu-title">Make room<br /><em>to move.</em></h2></div><button className="icon-button menu-close" onClick={closeMenu} aria-label="Close menu"><X size={18} /></button></div>
+            <nav className="menu-nav" aria-label="ROAM menu">
+              <button onClick={() => scrollToSection("destination-picker")}><span>01</span><strong>Destinations</strong><ArrowRight size={16} /></button>
+              <button onClick={() => scrollToSection("explore")}><span>02</span><strong>Curated activities</strong><ArrowRight size={16} /></button>
+              <button onClick={() => { closeMenu(); setShowMobilePlan(true); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
+            </nav>
+            <div className="menu-settings">
+              <div className="menu-setting"><span>04</span><strong>Currency</strong><b>{destination.currency.code} ({destination.currency.symbol})</b></div>
+              <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>05</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
+              <button className={`menu-setting menu-toggle ${reduceMotion ? "active" : ""}`} onClick={() => setReduceMotion((current) => !current)}><span>06</span><strong>Reduce motion</strong><b>{reduceMotion ? "On" : "Off"}</b></button>
+            </div>
+            <button className="menu-reset" onClick={() => { closeMenu(); setShowResetConfirm(true); }}><span>07</span><strong>Reset plan</strong><Trash2 size={15} /></button>
+          </aside>
+        </div>
+      )}
+
+      {showResetConfirm && (
+        <div className="reset-overlay" onClick={() => setShowResetConfirm(false)}>
+          <div className="reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="reset-title" onClick={(event) => event.stopPropagation()}>
+            <span className="section-kicker">Start over</span>
+            <h2 id="reset-title">Reset your trip?</h2>
+            <p>This will remove your selected activities, quantities, and budget.</p>
+            <div className="reset-actions"><button className="checkout-secondary" onClick={() => setShowResetConfirm(false)}>Cancel</button><button className="checkout-primary" onClick={resetPlan}>Reset plan</button></div>
+          </div>
+        </div>
+      )}
 
       {selectedActivity && (
         <div className="detail-overlay" onClick={() => setSelectedActivityId(null)}>

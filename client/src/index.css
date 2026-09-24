@@ -477,4 +477,80 @@ h1 em { color: #d85d43; font-style: italic; }
 @keyframes sheetIn { from { transform: translateY(30px); opacity: 0.4; } to { transform: translateY(0); opacity: 1; } }
 @media (max-width: 400px) { .destination-chip { min-width: 138px; } .banner-content h2 { font-size: 41px; } .section-heading-row h2 { font-size: 28px; } }
 
-.dark { color-scheme: light; }
+.journey-section { margin: 118px 30px 0; padding: 62px 0 0; border-top: 1px solid #d9ded5; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); column-gap: 90px; row-gap: 34px; }
+.journey-heading h2 { margin-top: 10px; font-family: "DM Serif Display", Georgia, serif; font-size: clamp(37px, 4vw, 57px); font-weight: 400; line-height: 0.96; letter-spacing: -0.04em; color: #25362b; }
+.journey-heading h2 em { color: #d85d43; font-style: italic; }
+.journey-heading p { max-width: 350px; margin-top: 19px; color: #748076; font-size: 12px; line-height: 1.75; }
+.journey-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+.journey-step { min-height: 156px; padding: 17px 15px; border-left: 1px solid #cbd8ca; background: #f0f3ed; }
+.journey-step > span { color: #d85d43; font-size: 10px; font-weight: 800; letter-spacing: 0.12em; }
+.journey-step strong { display: block; margin-top: 38px; color: #304838; font-size: 12px; line-height: 1.25; }
+.journey-step p { margin-top: 8px; color: #7a877c; font-size: 10px; line-height: 1.55; }
+.journey-cta { grid-column: 2; justify-self: start; display: flex; align-items: center; gap: 8px; padding: 11px 15px; background: #2f513d; color: #fffaf4; font-size: 10px; font-weight: 800; transition: background 180ms ease, transform 160ms ease; }
+.journey-cta:hover { background: #244432; }
+.menu-overlay, .reset-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(23, 33, 26, 0.46); }
+.menu-overlay { animation: fade 180ms ease both; }
+.menu-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(430px, 100%); overflow-y: auto; padding: 30px 28px 34px; background: #f7f5ef; box-shadow: -20px 0 55px rgba(26, 39, 29, 0.18); animation: menuIn 330ms cubic-bezier(.16,1,.3,1) both; }
+.menu-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding-bottom: 42px; border-bottom: 1px solid #d9ded5; }
+.menu-header h2 { margin-top: 10px; font-family: "DM Serif Display", Georgia, serif; font-size: 44px; font-weight: 400; line-height: 0.94; letter-spacing: -0.04em; color: #26392b; }
+.menu-header h2 em { color: #d85d43; font-style: italic; }
+.menu-close { background: #e8eee7; }
+.menu-nav { padding: 19px 0 12px; border-bottom: 1px solid #d9ded5; }
+.menu-nav button, .menu-setting, .menu-reset { width: 100%; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 0; background: transparent; color: #2f4938; text-align: left; }
+.menu-nav button { transition: color 160ms ease, transform 160ms ease; }
+.menu-nav button:hover { color: #d85d43; transform: translateX(4px); }
+.menu-nav button > span, .menu-setting > span, .menu-reset > span { color: #d85d43; font-size: 10px; font-weight: 800; letter-spacing: 0.12em; }
+.menu-nav strong, .menu-setting strong, .menu-reset strong { font-size: 15px; font-weight: 700; }
+.menu-settings { padding: 15px 0; border-bottom: 1px solid #d9ded5; }
+.menu-setting b { color: #7b897e; font-size: 11px; font-weight: 700; }
+.menu-toggle { cursor: pointer; }
+.menu-toggle:hover, .menu-toggle.active { color: #d85d43; }
+.menu-reset { margin-top: 12px; padding: 15px 12px; background: #f2dfd8; color: #8d4536; }
+.menu-reset:hover { background: #ecd0c7; }
+.reset-overlay { display: grid; place-items: center; padding: 20px; animation: fade 160ms ease both; }
+.reset-dialog { width: min(420px, 100%); padding: 30px; background: #fffdf8; box-shadow: 0 22px 60px rgba(25, 37, 28, 0.22); animation: dialogIn 220ms cubic-bezier(.23,1,.32,1) both; }
+.reset-dialog h2 { margin-top: 10px; color: #2d4434; font-family: "DM Serif Display", Georgia, serif; font-size: 36px; font-weight: 400; letter-spacing: -0.04em; }
+.reset-dialog p { margin-top: 10px; color: #778478; font-size: 12px; line-height: 1.6; }
+.reset-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 25px; }
+@keyframes menuIn { from { transform: translateX(100%); opacity: 0.72; } to { transform: translateX(0); opacity: 1; } }
+@keyframes dialogIn { from { transform: translateY(10px) scale(0.97); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+
+.dark { color-scheme: dark; --background: #17211b; --foreground: #edf3ea; --card: #202d24; --card-foreground: #edf3ea; --popover: #202d24; --popover-foreground: #edf3ea; --border: #405146; --input: #44574a; }
+.dark body { background: #17211b; color: #edf3ea; }
+.dark .topbar { background: rgba(23, 33, 27, 0.9); border-color: rgba(220, 232, 220, 0.14); }
+.dark .desktop-nav, .dark .intro-text, .dark .intro-side-note, .dark .result-count, .dark .journey-heading p, .dark .journey-step p { color: #aebcaf; }
+.dark h1, .dark .journey-heading h2, .dark .section-heading-row h2, .dark .menu-header h2 { color: #eff5ec; }
+.dark .destination-picker, .dark .destination-search-wrap, .dark .activity-search, .dark .activity-card, .dark .reset-dialog { background: #202d24; border-color: #405146; }
+.dark .destination-picker, .dark .activity-card, .dark .reset-dialog { box-shadow: 0 16px 35px rgba(0, 0, 0, 0.16); }
+.dark .destination-search-wrap input, .dark .activity-search input, .dark .activity-card h3, .dark .activity-card-footer strong { color: #edf3ea; }
+.dark .destination-chip { background: #2b3b30; color: #dce8dd; }
+.dark .destination-chip.selected { background: #4d302a; border-color: #d85d43; }
+.dark .filters-panel, .dark .journey-step { background: #26382b; border-color: #405146; }
+.dark .filter-options button, .dark .filter-toggle { background: #2c3d31; color: #c8d8ca; border-color: #405146; }
+.dark .filter-options button:hover, .dark .filter-options button.active { background: #344a39; color: #eff5ec; }
+.dark .activity-card p, .dark .activity-location, .dark .activity-card-footer, .dark .journey-step p, .dark .reset-dialog p { color: #aebcaf; }
+.dark .journey-step strong { color: #e4efe5; }
+.dark .menu-panel { background: #17211b; box-shadow: -20px 0 55px rgba(0, 0, 0, 0.3); }
+.dark .menu-header, .dark .menu-nav, .dark .menu-settings { border-color: #405146; }
+.dark .menu-nav button, .dark .menu-setting, .dark .menu-reset { color: #e6f0e5; }
+.dark .menu-setting b { color: #aebcaf; }
+.dark .menu-close { background: #2b3b30; color: #e6f0e5; }
+.dark .reset-dialog { background: #202d24; }
+.dark .checkout-secondary { background: #2b3b30; color: #e6f0e5; border-color: #405146; }
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+
+@media (max-width: 760px) {
+  .journey-section { display: block; margin: 77px 0 0; padding-top: 39px; }
+  .journey-heading h2 { font-size: 42px; }
+  .journey-heading p { max-width: 340px; }
+  .journey-steps { grid-template-columns: 1fr; gap: 9px; margin-top: 28px; }
+  .journey-step { min-height: auto; padding: 16px; }
+  .journey-step strong { margin-top: 21px; }
+  .journey-cta { margin-top: 21px; }
+  .menu-panel { width: 100%; padding: 24px 20px calc(26px + env(safe-area-inset-bottom)); }
+  .menu-header { padding-bottom: 31px; }
+  .menu-header h2 { font-size: 41px; }
+  .menu-nav button, .menu-setting, .menu-reset { min-height: 50px; }
+  .reset-actions { flex-direction: column-reverse; }
+  .reset-actions button { width: 100%; min-height: 45px; }
+}
