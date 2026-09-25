@@ -94,7 +94,7 @@ const destinations: Destination[] = [
     name: "Kyoto",
     country: "Japan",
     days: "3 days",
-    image: "/manus-storage/roam-kyoto_443cd089.jpg",
+    image: "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=86",
     note: "Temple paths, quiet lanes, and small rituals.",
     currency: { code: "JPY", symbol: "¥" },
   },
@@ -103,7 +103,7 @@ const destinations: Destination[] = [
     name: "Lisbon",
     country: "Portugal",
     days: "3 days",
-    image: "/manus-storage/roam-lisbon_33475605.jpg",
+    image: "https://images.unsplash.com/photo-1509840841025-9088ba78a826?auto=format&fit=crop&w=1200&q=86",
     note: "Sun-warmed tiles, sea air, and late dinners.",
     currency: { code: "EUR", symbol: "€" },
   },
@@ -112,7 +112,7 @@ const destinations: Destination[] = [
     name: "Reykjavík",
     country: "Iceland",
     days: "3 days",
-    image: "/manus-storage/roam-reykjavik_8421fb14.jpg",
+    image: "https://images.unsplash.com/photo-1504893524553-b855bce32c67?auto=format&fit=crop&w=1200&q=86",
     note: "Wide skies, warm pools, and wild edges.",
     currency: { code: "ISK", symbol: "kr" },
   },
@@ -197,7 +197,7 @@ const activityData: Record<DestinationId, Activity[]> = {
       duration: "2 hr",
       price: 38,
       location: "Alfama, Lisbon",
-      image: "/manus-storage/roam-lisbon_33475605.jpg",
+      image: "https://images.unsplash.com/photo-1555881400-74d7acaacd8b?auto=format&fit=crop&w=900&q=86",
       accent: "#d85d43",
     },
     {
@@ -394,6 +394,7 @@ export default function Home() {
     }
   });
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [pendingPlanToLoad, setPendingPlanToLoad] = useState<SavedPlan | null>(null);
   const [reduceMotion, setReduceMotion] = useState(() => typeof window !== "undefined" && (localStorage.getItem("roam-reduce-motion") === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches));
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
@@ -478,13 +479,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!selectedActivityId && !showMobilePlan && !checkoutStep && !showMenu && !showResetConfirm) return;
+    if (!selectedActivityId && !showMobilePlan && !checkoutStep && !showMenu && !showResetConfirm && !pendingPlanToLoad) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, showResetConfirm]);
+  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, showResetConfirm, pendingPlanToLoad]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-motion", reduceMotion);
@@ -496,16 +497,17 @@ export default function Home() {
   }, [savedPlans]);
 
   useEffect(() => {
-    if (!showMenu && !showResetConfirm) return;
+    if (!showMenu && !showResetConfirm && !pendingPlanToLoad) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setShowMenu(false);
         setShowResetConfirm(false);
+        setPendingPlanToLoad(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showMenu, showResetConfirm]);
+  }, [showMenu, showResetConfirm, pendingPlanToLoad]);
 
   useEffect(() => () => {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
@@ -554,6 +556,15 @@ export default function Home() {
     setShowSavedPlans(false);
     closeMenu();
     flashNotice(`${savedDestination.name} plan reopened`);
+  };
+
+  const requestLoadSavedPlan = (plan: SavedPlan) => {
+    const hasUnsavedPlanningState = (selectedIds.length > 0 || budgetInput.trim() !== "") && !isPlanSaved;
+    if (hasUnsavedPlanningState) {
+      setPendingPlanToLoad(plan);
+      return;
+    }
+    loadSavedPlan(plan);
   };
 
   const deleteSavedPlan = (id: string) => {
@@ -965,7 +976,7 @@ export default function Home() {
               <button onClick={() => { closeMenu(); if (window.matchMedia("(max-width: 760px)").matches) setShowMobilePlan(true); else window.setTimeout(() => document.getElementById("itinerary")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" }), 170); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
               <button className="menu-saved" onClick={() => setShowSavedPlans((current) => !current)}><span>04</span><strong>Saved Plans ({savedPlans.length})</strong><ChevronDown size={15} className={showSavedPlans ? "rotated" : ""} /></button>
             </nav>
-            {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => loadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
+            {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => requestLoadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
             <div className="menu-settings">
               <button className="menu-setting currency-control" onClick={() => setCurrencyCode(currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length])}><span>05</span><strong>Currency</strong><b>{selectedCurrency.code} ({selectedCurrency.symbol})</b></button>
               <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>06</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
@@ -983,6 +994,20 @@ export default function Home() {
             <h2 id="reset-title">Reset your trip?</h2>
             <p>This will remove your selected activities, quantities, and budget.</p>
             <div className="reset-actions"><button className="checkout-secondary" onClick={() => setShowResetConfirm(false)}>Cancel</button><button className="checkout-primary" onClick={resetPlan}>Reset plan</button></div>
+          </div>
+        </div>
+      )}
+
+      {pendingPlanToLoad && (
+        <div className="reset-overlay" onClick={() => setPendingPlanToLoad(null)}>
+          <div className="reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="overwrite-plan-title" onClick={(event) => event.stopPropagation()}>
+            <span className="section-kicker">Saved plan</span>
+            <h2 id="overwrite-plan-title">Replace current plan?</h2>
+            <p>Your current unsaved plan and budget will be replaced with this saved itinerary.</p>
+            <div className="reset-actions">
+              <button className="checkout-secondary" onClick={() => setPendingPlanToLoad(null)}>Cancel</button>
+              <button className="checkout-primary" onClick={() => { const target = pendingPlanToLoad; setPendingPlanToLoad(null); loadSavedPlan(target); }}>Replace plan</button>
+            </div>
           </div>
         </div>
       )}

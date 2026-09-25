@@ -503,8 +503,8 @@ h1 em { color: #d85d43; font-style: italic; }
 .saved-plan-row > button:first-child { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; background: transparent; color: #355044; text-align: left; }
 .saved-plan-row strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .saved-plan-row small { color: #8a978b; font-size: 9px; }
-.saved-plan-delete { display: grid; place-items: center; width: 28px; height: 28px; background: #f2dfd8; color: #bd523e; }
-.saved-plan-delete:hover { background: #eaccc2; }
+.saved-plan-delete { display: grid; place-items: center; width: 28px; height: 28px; background: transparent; color: #a93c28; }
+.saved-plan-delete:hover { background: transparent; color: #8a2e1d; }
 .banner-save.is-saved { background: #dbe8dc; color: #31553d; }
 .menu-overlay, .reset-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(23, 33, 26, 0.46); }
 .menu-overlay { animation: fade 180ms ease both; }
@@ -523,8 +523,10 @@ h1 em { color: #d85d43; font-style: italic; }
 .menu-setting b { color: #7b897e; font-size: 11px; font-weight: 700; }
 .menu-toggle { cursor: pointer; }
 .menu-toggle:hover, .menu-toggle.active { color: #d85d43; }
-.menu-reset { margin-top: 12px; padding: 15px 12px; background: #f2dfd8; color: #8d4536; }
-.menu-reset:hover { background: #ecd0c7; }
+.menu-reset { margin-top: 12px; padding: 15px 12px; background: #f2dfd8; color: #5c1e13; }
+.menu-reset:hover { background: #ecd0c7; color: #4a150c; }
+.menu-reset strong, .menu-reset svg { color: #5c1e13; }
+.menu-reset > span { color: #7d2a1b; }
 .reset-overlay { display: grid; place-items: center; padding: 20px; animation: fade 160ms ease both; }
 .reset-dialog { width: min(420px, 100%); padding: 30px; background: #fffdf8; box-shadow: 0 22px 60px rgba(25, 37, 28, 0.22); animation: dialogIn 220ms cubic-bezier(.23,1,.32,1) both; }
 .reset-dialog h2 { margin-top: 10px; color: #2d4434; font-family: "DM Serif Display", Georgia, serif; font-size: 36px; font-weight: 400; letter-spacing: -0.04em; }
@@ -537,7 +539,7 @@ h1 em { color: #d85d43; font-style: italic; }
 .dark body { background: #17211b; color: #edf3ea; }
 .dark .topbar { background: rgba(23, 33, 27, 0.9); border-color: rgba(220, 232, 220, 0.14); }
 .dark .desktop-nav, .dark .intro-text, .dark .intro-side-note, .dark .result-count, .dark .journey-heading p, .dark .journey-step p { color: #aebcaf; }
-.dark h1, .dark .journey-heading h2, .dark .section-heading-row h2, .dark .menu-header h2 { color: #eff5ec; }
+.dark h1, .dark .journey-heading h2, .dark .section-heading-row h2, .dark .menu-header h2, .dark .reset-dialog h2 { color: #eff5ec; }
 .dark .destination-picker, .dark .destination-search-wrap, .dark .activity-search, .dark .activity-card, .dark .reset-dialog { background: #202d24; border-color: #405146; }
 .dark .destination-picker, .dark .activity-card, .dark .reset-dialog { box-shadow: 0 16px 35px rgba(0, 0, 0, 0.16); }
 .dark .destination-search-wrap input, .dark .activity-search input, .dark .activity-card h3, .dark .activity-card-footer strong { color: #edf3ea; }
@@ -550,11 +552,16 @@ h1 em { color: #d85d43; font-style: italic; }
 .dark .journey-step strong { color: #e4efe5; }
 .dark .menu-panel { background: #17211b; box-shadow: -20px 0 55px rgba(0, 0, 0, 0.3); }
 .dark .menu-header, .dark .menu-nav, .dark .menu-settings { border-color: #405146; }
-.dark .menu-nav button, .dark .menu-setting, .dark .menu-reset { color: #e6f0e5; }
+.dark .menu-nav button, .dark .menu-setting { color: #e6f0e5; }
+.dark .menu-reset { color: #5c1e13; }
+.dark .menu-reset strong, .dark .menu-reset svg { color: #5c1e13; }
+.dark .menu-reset > span { color: #7d2a1b; }
 .dark .menu-saved { color: #e6f0e5; }
 .dark .saved-plans-list { border-color: #405146; }
 .dark .saved-plan-row > button:first-child { color: #e6f0e5; }
 .dark .saved-plan-row small { color: #aebcaf; }
+.dark .saved-plan-delete { color: #d96b54; }
+.dark .saved-plan-delete:hover { color: #e67d67; }
 .dark .options-trigger { color: #e6f0e5; }
 .dark .journey-cta { background: #f4e9da; color: #24362b; }
 .dark .journey-cta:hover { background: #fff5e8; }
