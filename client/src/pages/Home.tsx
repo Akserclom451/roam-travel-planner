@@ -980,7 +980,7 @@ export default function Home() {
             {renderDayItems(activeDay)}
             <div className="rail-tip"><Sparkles size={15} /><span><strong>Leave 20% unplanned.</strong><br />The best moments rarely make the first draft.</span></div>
             <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & mock pay <ArrowRight size={15} /></button>
-            <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
+            <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </section>
         <section className="journey-section reveal-on-scroll" id="how-it-works" aria-labelledby="journey-title">
@@ -1075,7 +1075,7 @@ export default function Home() {
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
             <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>{renderDayItems(activeDay)}
             <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & mock pay <ArrowRight size={15} /></button>
-            <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
+            <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </div>
       )}
@@ -1133,7 +1133,7 @@ export default function Home() {
             )}
 
             {checkoutStep === "success" && (
-              <div className="checkout-body checkout-result"><div className="result-mark success-mark"><Check size={27} /></div><span className="result-kicker">Mock payment successful</span><h3>Keep this plan close.</h3><p>No real charge or external booking was made. Your itinerary remains available to edit.</p><div className="confirmation-meta"><span><small>Test reference</small><strong>{orderReference}</strong></span><span><small>Final amount</small><strong>{formatPrice(totalCost, destination.currency)}</strong></span></div><div className="confirmation-list">{checkoutItems.map(({ day, item, activity }) => <div key={`${day}-${activity.id}`}><span>{day}</span><strong>{activity.name} × {item.quantity}</strong></div>)}</div><div className="checkout-actions"><button className="checkout-secondary" onClick={returnToItinerary}>Return to itinerary</button><button className="checkout-primary" onClick={() => { setCheckoutStep(null); document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" }); }}>Continue exploring <ArrowRight size={16} /></button></div></div>
+              <div className="checkout-body checkout-result"><div className="result-mark success-mark"><Check size={27} /></div><span className="result-kicker">Mock payment successful</span><h3>Keep this plan close.</h3><p>No real charge or external booking was made. Your itinerary remains available to edit.</p><div className="confirmation-meta"><span><small>Test reference</small><strong>{orderReference}</strong></span><span><small>Final amount</small><strong>{formatPrice(totalCost, destination.currency)}</strong></span></div><div className="confirmation-list">{checkoutItems.map(({ day, item, activity }) => <div key={`${day}-${activity.id}`}><span>{day}</span><strong>{activity.name} × {item.quantity}</strong></div>)}</div><div className="checkout-actions"><button className="checkout-secondary" onClick={returnToItinerary}>Return to itinerary</button><button className="checkout-primary" onClick={() => { setCheckoutStep(null); document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }); }}>Continue exploring <ArrowRight size={16} /></button></div></div>
             )}
 
             {checkoutStep === "failure" && (

@@ -74,6 +74,16 @@
   transform: translateY(0);
 }
 
+.reveal-on-scroll .destination-chip,
+.reveal-on-scroll .activity-card {
+  animation-play-state: paused;
+}
+
+.reveal-on-scroll.is-revealed .destination-chip,
+.reveal-on-scroll.is-revealed .activity-card {
+  animation-play-state: running;
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
@@ -103,6 +113,23 @@ a { color: inherit; text-decoration: none; }
 .nav-action, .icon-button { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 50%; background: transparent; color: #566359; transition: background 180ms ease, color 180ms ease, transform 160ms var(--ease-editorial); }
 .nav-action:hover, .icon-button:hover { background: #e7ece4; color: #1f2823; }
 .nav-action:active, .icon-button:active { transform: scale(0.92); }
+.day-tabs button:active,
+.quantity-control button:active,
+.filter-toggle:active,
+.filter-options button:active,
+.reset-filters:active,
+.clear-search:active,
+.destination-suggestion:active,
+.no-results button:active,
+.menu-nav button:active,
+.menu-setting:active,
+.menu-reset:active,
+.menu-saved:active,
+.saved-plan-row > button:first-child:active,
+.saved-plan-delete:active,
+.mobile-summary-bar button:active {
+  transform: scale(0.96);
+}
 .mobile-only { display: none; }
 
 .page-wrap { max-width: 1320px; margin: 0 auto; padding: 78px 40px 100px; }
@@ -434,6 +461,10 @@ h1 em { color: #d85d43; font-style: italic; }
     animation: none !important;
     transform: none !important;
   }
+  .reveal-on-scroll .destination-chip,
+  .reveal-on-scroll .activity-card {
+    animation-play-state: running !important;
+  }
 }
 @media (max-width: 980px) {
   .topbar-inner { padding-inline: 24px; }
@@ -661,6 +692,11 @@ h1 em { color: #d85d43; font-style: italic; }
 .reduce-motion .destination-chip {
   animation: none !important;
   transform: none !important;
+}
+
+.reduce-motion .reveal-on-scroll .destination-chip,
+.reduce-motion .reveal-on-scroll .activity-card {
+  animation-play-state: running !important;
 }
 
 @media (max-width: 760px) {
