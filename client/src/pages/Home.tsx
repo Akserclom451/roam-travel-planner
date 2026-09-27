@@ -877,9 +877,9 @@ export default function Home() {
         </section>
 
         <section className="destination-banner reveal-on-scroll" aria-label={`Selected destination: ${destination.name}`}>
-          <img src={destination.image} alt={`${destination.name} travel scene`} />
+          <img key={`banner-img-${destination.id}`} src={destination.image} alt={`${destination.name} travel scene`} />
           <div className="banner-scrim" />
-          <div className="banner-content">
+          <div key={`banner-content-${destination.id}`} className="banner-content">
             <div>
               <span className="banner-kicker">Now planning</span>
               <h2>{destination.name}<span className="banner-country">, {destination.country}</span></h2>
