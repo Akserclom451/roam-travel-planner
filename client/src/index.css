@@ -482,6 +482,11 @@ h1 em { color: #d85d43; font-style: italic; }
     animation: none !important;
     transform: none !important;
   }
+  .menu-nav button {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
   .reveal-on-scroll .destination-chip,
   .reveal-on-scroll .activity-card {
     animation-play-state: running !important;
@@ -636,7 +641,14 @@ h1 em { color: #d85d43; font-style: italic; }
 .menu-close { background: #e8eee7; }
 .menu-nav { padding: 19px 0 12px; border-bottom: 1px solid #d9ded5; }
 .menu-nav button, .menu-setting, .menu-reset { width: 100%; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 0; background: transparent; color: #2f4938; text-align: left; }
-.menu-nav button { transition: color 160ms ease, transform 160ms ease; }
+.menu-nav button {
+  transition: color 160ms ease, transform 160ms ease;
+  animation: menuRowIn var(--dur-fast) var(--ease-editorial) backwards;
+}
+.menu-nav button:nth-child(1) { animation-delay: 0ms; }
+.menu-nav button:nth-child(2) { animation-delay: 40ms; }
+.menu-nav button:nth-child(3) { animation-delay: 80ms; }
+.menu-nav button:nth-child(4) { animation-delay: 120ms; }
 .menu-nav button:hover { color: #d85d43; transform: translateX(4px); }
 .menu-nav button > span, .menu-setting > span, .menu-reset > span { color: #d85d43; font-size: 10px; font-weight: 800; letter-spacing: 0.12em; }
 .menu-nav strong, .menu-setting strong, .menu-reset strong { font-size: 15px; font-weight: 700; }
@@ -654,6 +666,10 @@ h1 em { color: #d85d43; font-style: italic; }
 .reset-dialog p { margin-top: 10px; color: #778478; font-size: 12px; line-height: 1.6; }
 .reset-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 25px; }
 @keyframes menuIn { from { transform: translateX(100%); opacity: 0.72; } to { transform: translateX(0); opacity: 1; } }
+@keyframes menuRowIn {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 @keyframes dialogIn { from { transform: translateY(10px) scale(0.97); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
 .dark { color-scheme: dark; --background: #17211b; --foreground: #edf3ea; --card: #202d24; --card-foreground: #edf3ea; --popover: #202d24; --popover-foreground: #edf3ea; --border: #405146; --input: #44574a; }
@@ -724,6 +740,12 @@ h1 em { color: #d85d43; font-style: italic; }
 .reduce-motion .banner-content {
   animation: none !important;
   transform: none !important;
+}
+
+.reduce-motion .menu-nav button {
+  animation: none !important;
+  transform: none !important;
+  opacity: 1 !important;
 }
 
 .reduce-motion .reveal-on-scroll .destination-chip,
