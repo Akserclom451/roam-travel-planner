@@ -352,7 +352,7 @@ h1 em { color: #d85d43; font-style: italic; }
 .checkout-progress i { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e8eee6; color: #718071; font-size: 9px; font-style: normal; }
 .checkout-progress span.active { color: #4a6650; }
 .checkout-progress span.active i, .checkout-progress span.complete i { background: #d85d43; color: #fffaf4; }
-.checkout-body { padding: 28px 34px 34px; }
+.checkout-body { padding: 28px 34px 34px; animation: checkoutStepIn var(--dur-normal) var(--ease-editorial) both; }
 .checkout-destination { display: flex; align-items: center; gap: 14px; padding: 12px; border: 1px solid #dfe6dc; background: #f1f5ee; }
 .checkout-destination img { width: 66px; height: 56px; object-fit: cover; }
 .checkout-destination div { display: flex; flex-direction: column; gap: 3px; }
@@ -436,6 +436,10 @@ h1 em { color: #d85d43; font-style: italic; }
 @keyframes slideIn { from { transform: translateX(24px); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes checkoutIn { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes checkoutStepIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 @keyframes breathe { 0%, 100% { transform: scale(0.98); opacity: 0.8; } 50% { transform: scale(1.04); opacity: 1; } }
 @keyframes processing { from { transform: translateX(-130%); } to { transform: translateX(330%); } }
 
@@ -458,6 +462,10 @@ h1 em { color: #d85d43; font-style: italic; }
     transition: none !important;
   }
   .destination-chip {
+    animation: none !important;
+    transform: none !important;
+  }
+  .checkout-body {
     animation: none !important;
     transform: none !important;
   }
@@ -690,6 +698,11 @@ h1 em { color: #d85d43; font-style: italic; }
 }
 
 .reduce-motion .destination-chip {
+  animation: none !important;
+  transform: none !important;
+}
+
+.reduce-motion .checkout-body {
   animation: none !important;
   transform: none !important;
 }
