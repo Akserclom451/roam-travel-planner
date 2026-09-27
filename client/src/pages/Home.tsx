@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -513,6 +513,33 @@ export default function Home() {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (reduceMotion || !("IntersectionObserver" in window)) {
+      document.querySelectorAll(".reveal-on-scroll").forEach((el) => {
+        el.classList.add("is-revealed");
+      });
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-revealed");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.08, rootMargin: "0px 0px -30px 0px" }
+    );
+
+    const elements = document.querySelectorAll(".reveal-on-scroll:not(.is-revealed)");
+    elements.forEach((el) => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, [reduceMotion, selectedDestination]);
+
   const switchDestination = (id: DestinationId) => {
     const previousDestination = destination.name;
     const hadItinerary = selectedIds.length > 0;
@@ -810,7 +837,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="destination-picker" id="destination-picker" aria-label="Choose a destination">
+        <section className="destination-picker reveal-on-scroll" id="destination-picker" aria-label="Choose a destination">
           <div className="picker-label"><Compass size={15} /> Where are you going?</div>
           <div className="destination-search-wrap">
             <Search size={20} />
@@ -834,8 +861,13 @@ export default function Home() {
             </div>
           )}
           <div className="destination-chips">
-            {destinations.map((item) => (
-              <button key={item.id} className={`destination-chip ${selectedDestination === item.id ? "selected" : ""}`} onClick={() => switchDestination(item.id)}>
+            {destinations.map((item, index) => (
+              <button
+                key={item.id}
+                className={`destination-chip ${selectedDestination === item.id ? "selected" : ""}`}
+                style={{ "--chip-index": index } as CSSProperties}
+                onClick={() => switchDestination(item.id)}
+              >
                 <img src={item.image} alt="" />
                 <span><strong>{item.name}</strong><small>{item.country}</small></span>
                 {selectedDestination === item.id && <Check size={15} />}
@@ -844,7 +876,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="destination-banner" aria-label={`Selected destination: ${destination.name}`}>
+        <section className="destination-banner reveal-on-scroll" aria-label={`Selected destination: ${destination.name}`}>
           <img src={destination.image} alt={`${destination.name} travel scene`} />
           <div className="banner-scrim" />
           <div className="banner-content">
@@ -863,7 +895,7 @@ export default function Home() {
           <button onClick={() => setShowMobilePlan(true)}>View itinerary <ArrowRight size={15} /></button>
         </div>
 
-        <section className="planning-layout" id="explore">
+        <section className="planning-layout reveal-on-scroll" id="explore">
           <div className="discovery-column">
             <div className="section-heading-row">
               <div>
@@ -951,7 +983,7 @@ export default function Home() {
             <button className="continue-button" onClick={() => document.getElementById("explore")?.scrollIntoView({ behavior: "smooth" })}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </section>
-        <section className="journey-section" id="how-it-works" aria-labelledby="journey-title">
+        <section className="journey-section reveal-on-scroll" id="how-it-works" aria-labelledby="journey-title">
           <div className="journey-heading">
             <span className="section-kicker">A gentler way to plan</span>
             <h2 id="journey-title">From a first idea<br /><em>to a trip with shape.</em></h2>
