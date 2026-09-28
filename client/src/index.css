@@ -311,7 +311,9 @@ h1 em { color: #d85d43; font-style: italic; }
 .mobile-summary-bar { display: none; }
 
 .detail-overlay, .mobile-plan-overlay { position: fixed; inset: 0; z-index: 60; overflow: hidden; background: rgba(31, 40, 35, 0.34); animation: fade 180ms ease-out both; }
+.detail-overlay.is-closing { animation: fadeOut var(--dur-fast) var(--ease-editorial) forwards; }
 .detail-panel { position: absolute; top: 0; right: 0; width: min(490px, 100%); height: 100%; overflow-y: auto; background: #fffdf8; box-shadow: -20px 0 50px rgba(24, 36, 28, 0.17); animation: slideIn 260ms cubic-bezier(.23,1,.32,1) both; }
+.detail-panel.is-closing { animation: slideOut var(--dur-fast) var(--ease-editorial) forwards; }
 .detail-image-wrap { position: relative; height: 300px; }
 .detail-image-wrap img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.82); }
 .detail-image-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(24, 37, 29, 0.34), transparent 55%); }
@@ -433,7 +435,12 @@ h1 em { color: #d85d43; font-style: italic; }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes reveal { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
 @keyframes slideIn { from { transform: translateX(24px); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideOut {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(24px); }
+}
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes checkoutIn { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes checkoutStepIn {
@@ -486,6 +493,11 @@ h1 em { color: #d85d43; font-style: italic; }
     animation: none !important;
     transform: none !important;
     opacity: 1 !important;
+  }
+  .detail-panel,
+  .detail-overlay {
+    animation: none !important;
+    transform: none !important;
   }
   .reveal-on-scroll .destination-chip,
   .reveal-on-scroll .activity-card {
@@ -584,6 +596,7 @@ h1 em { color: #d85d43; font-style: italic; }
   .confirmation-meta { grid-template-columns: 1fr; }
   .checkout-button { min-height: 46px; }
   .detail-panel { top: auto; width: 100%; height: auto; max-height: 90vh; border-radius: 24px 24px 0 0; animation-name: sheetIn; }
+  .detail-panel.is-closing { animation-name: sheetOut; }
   .detail-image-wrap { height: 210px; }
   .detail-content { padding: 23px 21px 30px; }
   .detail-content h2 { font-size: 37px; }
@@ -592,6 +605,10 @@ h1 em { color: #d85d43; font-style: italic; }
   .toast { bottom: 75px; white-space: nowrap; }
 }
 @keyframes sheetIn { from { transform: translateY(30px); opacity: 0.4; } to { transform: translateY(0); opacity: 1; } }
+@keyframes sheetOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(30px); }
+}
 @media (max-width: 400px) { .destination-chip { min-width: 138px; } .banner-content h2 { font-size: 41px; } .section-heading-row h2 { font-size: 28px; } }
 
 .journey-section { margin: 118px 30px 0; padding: 62px 0 0; border-top: 1px solid #d9ded5; display: grid; grid-template-columns: minmax(360px, 0.95fr) minmax(0, 1.35fr); column-gap: 64px; row-gap: 34px; }
@@ -644,7 +661,10 @@ h1 em { color: #d85d43; font-style: italic; }
 .menu-nav button {
   transition: color 160ms ease, transform 160ms ease;
   animation: menuRowIn var(--dur-fast) var(--ease-editorial) backwards;
+  -webkit-tap-highlight-color: transparent;
 }
+.menu-nav button:focus:not(:focus-visible) { outline: none; }
+.menu-nav button:active { background: transparent; }
 .menu-nav button:nth-child(1) { animation-delay: 0ms; }
 .menu-nav button:nth-child(2) { animation-delay: 40ms; }
 .menu-nav button:nth-child(3) { animation-delay: 80ms; }
@@ -746,6 +766,12 @@ h1 em { color: #d85d43; font-style: italic; }
   animation: none !important;
   transform: none !important;
   opacity: 1 !important;
+}
+
+.reduce-motion .detail-panel,
+.reduce-motion .detail-overlay {
+  animation: none !important;
+  transform: none !important;
 }
 
 .reduce-motion .reveal-on-scroll .destination-chip,

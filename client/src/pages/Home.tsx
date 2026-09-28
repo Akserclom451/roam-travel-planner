@@ -375,6 +375,8 @@ export default function Home() {
   const [priceFilter, setPriceFilter] = useState<PriceFilter>("All");
   const [activeDay, setActiveDay] = useState<DayId>("Day 1");
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [isDetailClosing, setIsDetailClosing] = useState(false);
+  const detailCloseTimeout = useRef<number | null>(null);
   const [itinerary, setItinerary] = useState<Record<DayId, PlannedActivity[]>>({
     "Day 1": [],
     "Day 2": [],
@@ -511,6 +513,7 @@ export default function Home() {
 
   useEffect(() => () => {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
+    if (detailCloseTimeout.current !== null) window.clearTimeout(detailCloseTimeout.current);
   }, []);
 
   useEffect(() => {
@@ -539,6 +542,32 @@ export default function Home() {
 
     return () => observer.disconnect();
   }, [reduceMotion, selectedDestination]);
+
+  const openDetail = (id: string) => {
+    if (detailCloseTimeout.current !== null) {
+      window.clearTimeout(detailCloseTimeout.current);
+      detailCloseTimeout.current = null;
+    }
+    setIsDetailClosing(false);
+    setSelectedActivityId(id);
+  };
+
+  const closeDetail = () => {
+    if (reduceMotion) {
+      setSelectedActivityId(null);
+      setIsDetailClosing(false);
+      return;
+    }
+    if (detailCloseTimeout.current !== null) {
+      window.clearTimeout(detailCloseTimeout.current);
+    }
+    setIsDetailClosing(true);
+    detailCloseTimeout.current = window.setTimeout(() => {
+      setSelectedActivityId(null);
+      setIsDetailClosing(false);
+      detailCloseTimeout.current = null;
+    }, 180);
+  };
 
   const switchDestination = (id: DestinationId) => {
     const previousDestination = destination.name;
@@ -935,8 +964,8 @@ export default function Home() {
                       className={`activity-card ${isAdded ? "added" : ""}`}
                       key={activity.id}
                       style={{ "--card-accent": activity.accent, "--stagger": `${index * 45}ms` } as React.CSSProperties}
-                      onClick={() => setSelectedActivityId(activity.id)}
-                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedActivityId(activity.id); }}
+                      onClick={() => openDetail(activity.id)}
+                      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openDetail(activity.id); }}
                       tabIndex={0}
                       role="button"
                       aria-label={`View details for ${activity.name}`}
@@ -1045,9 +1074,9 @@ export default function Home() {
       )}
 
       {selectedActivity && (
-        <div className="detail-overlay" onClick={() => setSelectedActivityId(null)}>
-          <aside className="detail-panel" onClick={(event) => event.stopPropagation()} aria-label="Activity details">
-            <div className="detail-image-wrap"><img src={selectedActivity.image} alt={`${selectedActivity.name} preview`} /><div className="detail-image-scrim" /><button className="detail-close" onClick={() => setSelectedActivityId(null)} aria-label="Close activity details"><X size={18} /></button><span className="detail-category">{selectedActivity.category}</span></div>
+        <div className={`detail-overlay ${isDetailClosing ? "is-closing" : ""}`} onClick={closeDetail}>
+          <aside className={`detail-panel ${isDetailClosing ? "is-closing" : ""}`} onClick={(event) => event.stopPropagation()} aria-label="Activity details">
+            <div className="detail-image-wrap"><img src={selectedActivity.image} alt={`${selectedActivity.name} preview`} /><div className="detail-image-scrim" /><button className="detail-close" onClick={closeDetail} aria-label="Close activity details"><X size={18} /></button><span className="detail-category">{selectedActivity.category}</span></div>
             <div className="detail-content">
               <div className="activity-location"><MapPin size={13} /> {selectedActivity.location}</div>
               <h2>{selectedActivity.name}</h2>
