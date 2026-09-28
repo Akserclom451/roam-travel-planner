@@ -377,6 +377,8 @@ export default function Home() {
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [isDetailClosing, setIsDetailClosing] = useState(false);
   const detailCloseTimeout = useRef<number | null>(null);
+  const [isMenuClosing, setIsMenuClosing] = useState(false);
+  const menuCloseTimeout = useRef<number | null>(null);
   const [itinerary, setItinerary] = useState<Record<DayId, PlannedActivity[]>>({
     "Day 1": [],
     "Day 2": [],
@@ -481,13 +483,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!selectedActivityId && !showMobilePlan && !checkoutStep && !showMenu && !showResetConfirm && !pendingPlanToLoad) return;
+    if (!selectedActivityId && !showMobilePlan && !checkoutStep && (!showMenu || isMenuClosing) && !showResetConfirm && !pendingPlanToLoad) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, showResetConfirm, pendingPlanToLoad]);
+  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, isMenuClosing, showResetConfirm, pendingPlanToLoad]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-motion", reduceMotion);
@@ -514,6 +516,7 @@ export default function Home() {
   useEffect(() => () => {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
     if (detailCloseTimeout.current !== null) window.clearTimeout(detailCloseTimeout.current);
+    if (menuCloseTimeout.current !== null) window.clearTimeout(menuCloseTimeout.current);
   }, []);
 
   useEffect(() => {
@@ -755,8 +758,37 @@ export default function Home() {
   };
 
   const closeMenu = () => {
-    setShowMenu(false);
-    window.setTimeout(() => menuTriggerRef.current?.focus(), reduceMotion ? 0 : 180);
+    if (reduceMotion) {
+      if (menuCloseTimeout.current !== null) {
+        window.clearTimeout(menuCloseTimeout.current);
+        menuCloseTimeout.current = null;
+      }
+      setShowMenu(false);
+      setIsMenuClosing(false);
+      window.setTimeout(() => menuTriggerRef.current?.focus(), 0);
+      return;
+    }
+
+    if (menuCloseTimeout.current !== null) return;
+
+    setIsMenuClosing(true);
+
+    menuCloseTimeout.current = window.setTimeout(() => {
+      setShowMenu(false);
+      setIsMenuClosing(false);
+      menuCloseTimeout.current = null;
+      menuTriggerRef.current?.focus();
+    }, 180);
+  };
+
+  const openMenu = () => {
+    if (menuCloseTimeout.current !== null) {
+      window.clearTimeout(menuCloseTimeout.current);
+      menuCloseTimeout.current = null;
+    }
+
+    setIsMenuClosing(false);
+    setShowMenu(true);
   };
 
   const scrollToSection = (id: string) => {
@@ -848,7 +880,7 @@ export default function Home() {
             <a href="#itinerary">My itinerary <span className="nav-count">{selectedIds.length}</span></a>
           </nav>
           <div className="topbar-actions">
-            <button ref={menuTriggerRef} className="nav-action options-trigger" aria-label="Open options" aria-expanded={showMenu} onClick={() => setShowMenu(true)}><span className="options-trigger-label">Options</span><Menu size={17} /></button>
+            <button ref={menuTriggerRef} className="nav-action options-trigger" aria-label="Open options" aria-expanded={showMenu} onClick={openMenu}><span className="options-trigger-label">Options</span><Menu size={17} /></button>
           </div>
         </div>
       </header>
@@ -1028,8 +1060,8 @@ export default function Home() {
       </main>
 
       {showMenu && (
-        <div className="menu-overlay" onClick={closeMenu}>
-          <aside className="menu-panel" role="dialog" aria-modal="true" aria-labelledby="menu-title" onClick={(event) => event.stopPropagation()}>
+        <div className={`menu-overlay ${isMenuClosing ? "is-closing" : ""}`} onClick={closeMenu}>
+          <aside className={`menu-panel ${isMenuClosing ? "is-closing" : ""}`} role="dialog" aria-modal="true" aria-labelledby="menu-title" onClick={(event) => event.stopPropagation()}>
             <div className="menu-header"><div><span className="section-kicker">ROAM / Options</span><h2 id="menu-title">Make room<br /><em>to move.</em></h2></div><button className="icon-button menu-close" onClick={closeMenu} aria-label="Close menu"><X size={18} /></button></div>
             <nav className="menu-nav" aria-label="ROAM menu">
               <button onClick={() => scrollToSection("destination-picker")}><span>01</span><strong>Destinations</strong><ArrowRight size={16} /></button>
