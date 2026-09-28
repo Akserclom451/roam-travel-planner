@@ -361,7 +361,7 @@ h1 em { color: #d85d43; font-style: italic; }
 .checkout-destination span, .checkout-section-heading span { color: #839083; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.12em; }
 .checkout-destination strong { color: #324c3a; font-size: 14px; }
 .checkout-destination small { color: #89958b; font-size: 10px; }
-.checkout-section-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 27px; padding-bottom: 9px; border-bottom: 1px solid #dfe4dc; }
+.checkout-section-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 27px; padding-bottom: 9px; border-bottom: 1px solid #d4dfdc; }
 .checkout-section-heading small { color: #98a299; font-size: 10px; }
 .checkout-items { display: flex; flex-direction: column; gap: 16px; margin-top: 13px; }
 .checkout-day-heading { display: flex; justify-content: space-between; margin-bottom: 6px; color: #4b6651; font-size: 11px; font-weight: 800; }
@@ -651,7 +651,13 @@ h1 em { color: #d85d43; font-style: italic; }
 .banner-save.is-saved { background: #dbe8dc; color: #31553d; }
 .menu-overlay, .reset-overlay { position: fixed; inset: 0; z-index: 80; background: rgba(23, 33, 26, 0.46); }
 .menu-overlay { animation: fade 180ms ease both; }
+.menu-overlay.is-closing {
+  animation: fadeOut var(--dur-fast) var(--ease-editorial) forwards;
+}
 .menu-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(430px, 100%); overflow-y: auto; padding: 30px 28px 34px; background: #f7f5ef; box-shadow: -20px 0 55px rgba(26, 39, 29, 0.18); animation: menuIn 330ms cubic-bezier(.16,1,.3,1) both; }
+.menu-panel.is-closing {
+  animation: menuOut var(--dur-fast) var(--ease-editorial) forwards;
+}
 .menu-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding-bottom: 42px; border-bottom: 1px solid #d9ded5; }
 .menu-header h2 { margin-top: 10px; font-family: "DM Serif Display", Georgia, serif; font-size: 44px; font-weight: 400; line-height: 0.94; letter-spacing: -0.04em; color: #26392b; }
 .menu-header h2 em { color: #d85d43; font-style: italic; }
@@ -686,6 +692,16 @@ h1 em { color: #d85d43; font-style: italic; }
 .reset-dialog p { margin-top: 10px; color: #778478; font-size: 12px; line-height: 1.6; }
 .reset-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 25px; }
 @keyframes menuIn { from { transform: translateX(100%); opacity: 0.72; } to { transform: translateX(0); opacity: 1; } }
+@keyframes menuOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0.72;
+  }
+}
 @keyframes menuRowIn {
   from { opacity: 0; transform: translateX(6px); }
   to { opacity: 1; transform: translateX(0); }
