@@ -386,6 +386,8 @@ export default function Home() {
   });
   const [budgetInput, setBudgetInput] = useState("");
   const [showMobilePlan, setShowMobilePlan] = useState(false);
+  const [isMobilePlanClosing, setIsMobilePlanClosing] = useState(false);
+  const mobilePlanCloseTimeout = useRef<number | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showSavedPlans, setShowSavedPlans] = useState(false);
@@ -483,13 +485,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!selectedActivityId && !showMobilePlan && !checkoutStep && (!showMenu || isMenuClosing) && !showResetConfirm && !pendingPlanToLoad) return;
+    if (!selectedActivityId && (!showMobilePlan || isMobilePlanClosing) && !checkoutStep && (!showMenu || isMenuClosing) && !showResetConfirm && !pendingPlanToLoad) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [selectedActivityId, showMobilePlan, checkoutStep, showMenu, isMenuClosing, showResetConfirm, pendingPlanToLoad]);
+  }, [selectedActivityId, showMobilePlan, isMobilePlanClosing, checkoutStep, showMenu, isMenuClosing, showResetConfirm, pendingPlanToLoad]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("reduce-motion", reduceMotion);
@@ -501,22 +503,24 @@ export default function Home() {
   }, [savedPlans]);
 
   useEffect(() => {
-    if (!showMenu && !showResetConfirm && !pendingPlanToLoad) return;
+    if (!showMenu && !showResetConfirm && !pendingPlanToLoad && !showMobilePlan) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setShowMenu(false);
+        closeMenu();
         setShowResetConfirm(false);
         setPendingPlanToLoad(null);
+        closeMobilePlan();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showMenu, showResetConfirm, pendingPlanToLoad]);
+  }, [showMenu, showResetConfirm, pendingPlanToLoad, showMobilePlan]);
 
   useEffect(() => () => {
     if (paymentTimer.current !== null) window.clearTimeout(paymentTimer.current);
     if (detailCloseTimeout.current !== null) window.clearTimeout(detailCloseTimeout.current);
     if (menuCloseTimeout.current !== null) window.clearTimeout(menuCloseTimeout.current);
+    if (mobilePlanCloseTimeout.current !== null) window.clearTimeout(mobilePlanCloseTimeout.current);
   }, []);
 
   useEffect(() => {
@@ -710,7 +714,7 @@ export default function Home() {
       flashNotice("Add at least one activity before checkout");
       return;
     }
-    setShowMobilePlan(false);
+    closeMobilePlan();
     setSelectedActivityId(null);
     setPaymentError("");
     setCheckoutStep("review");
@@ -754,7 +758,40 @@ export default function Home() {
   const returnToItinerary = () => {
     setCheckoutStep(null);
     setPaymentError("");
-    setShowMobilePlan(false);
+    closeMobilePlan();
+  };
+
+  const openMobilePlan = () => {
+    if (mobilePlanCloseTimeout.current !== null) {
+      window.clearTimeout(mobilePlanCloseTimeout.current);
+      mobilePlanCloseTimeout.current = null;
+    }
+    setIsMobilePlanClosing(false);
+    setShowMobilePlan(true);
+  };
+
+  const closeMobilePlan = (onComplete?: () => void) => {
+    if (reduceMotion) {
+      if (mobilePlanCloseTimeout.current !== null) {
+        window.clearTimeout(mobilePlanCloseTimeout.current);
+        mobilePlanCloseTimeout.current = null;
+      }
+      setShowMobilePlan(false);
+      setIsMobilePlanClosing(false);
+      onComplete?.();
+      return;
+    }
+
+    if (mobilePlanCloseTimeout.current !== null) return;
+
+    setIsMobilePlanClosing(true);
+
+    mobilePlanCloseTimeout.current = window.setTimeout(() => {
+      setShowMobilePlan(false);
+      setIsMobilePlanClosing(false);
+      mobilePlanCloseTimeout.current = null;
+      onComplete?.();
+    }, 180);
   };
 
   const closeMenu = () => {
@@ -886,7 +923,7 @@ export default function Home() {
       </header>
 
       <main id="top" className="page-wrap">
-        <section className="intro-section" aria-labelledby="page-title">
+        <section className="intro-section reveal-on-scroll" aria-labelledby="page-title">
           <div className="intro-copy">
             <div className="eyebrow"><Sparkles size={14} /> Trip planning, with room to wander</div>
             <h1 id="page-title">Make space for<br /><em>the good stuff.</em></h1>
@@ -953,7 +990,7 @@ export default function Home() {
 
         <div className="mobile-summary-bar">
           <div><span>{selectedIds.length} {selectedIds.length === 1 ? "activity" : "activities"}</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div>
-          <button onClick={() => setShowMobilePlan(true)}>View itinerary <ArrowRight size={15} /></button>
+          <button onClick={openMobilePlan}>View itinerary <ArrowRight size={15} /></button>
         </div>
 
         <section className="planning-layout reveal-on-scroll" id="explore">
@@ -1066,7 +1103,7 @@ export default function Home() {
             <nav className="menu-nav" aria-label="ROAM menu">
               <button onClick={() => scrollToSection("destination-picker")}><span>01</span><strong>Destinations</strong><ArrowRight size={16} /></button>
               <button onClick={() => scrollToSection("explore")}><span>02</span><strong>Curated activities</strong><ArrowRight size={16} /></button>
-              <button onClick={() => { closeMenu(); if (window.matchMedia("(max-width: 760px)").matches) setShowMobilePlan(true); else window.setTimeout(() => document.getElementById("itinerary")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" }), 170); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
+              <button onClick={() => { closeMenu(); if (window.matchMedia("(max-width: 760px)").matches) openMobilePlan(); else window.setTimeout(() => document.getElementById("itinerary")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" }), 170); }}><span>03</span><strong>Active itinerary ({selectedIds.length})</strong><ArrowRight size={16} /></button>
               <button className="menu-saved" onClick={() => setShowSavedPlans((current) => !current)}><span>04</span><strong>Saved Plans ({savedPlans.length})</strong><ChevronDown size={15} className={showSavedPlans ? "rotated" : ""} /></button>
             </nav>
             {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => requestLoadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
@@ -1122,9 +1159,9 @@ export default function Home() {
       )}
 
       {showMobilePlan && (
-        <div className="mobile-plan-overlay" onClick={() => setShowMobilePlan(false)}>
-          <aside className="mobile-plan-sheet" onClick={(event) => event.stopPropagation()} aria-label="Mobile itinerary">
-            <div className="sheet-handle" /><div className="sheet-header"><div><span className="section-kicker">Your trip</span><h2>{destination.name}, slowly.</h2></div><button className="icon-button" onClick={() => setShowMobilePlan(false)} aria-label="Close itinerary"><X size={18} /></button></div>
+        <div className={`mobile-plan-overlay ${isMobilePlanClosing ? "is-closing" : ""}`} onClick={() => closeMobilePlan()}>
+          <aside className={`mobile-plan-sheet ${isMobilePlanClosing ? "is-closing" : ""}`} onClick={(event) => event.stopPropagation()} aria-label="Mobile itinerary">
+            <div className="sheet-handle" /><div className="sheet-header"><div><span className="section-kicker">Your trip</span><h2>{destination.name}, slowly.</h2></div><button className="icon-button" onClick={() => closeMobilePlan()} aria-label="Close itinerary"><X size={18} /></button></div>
             <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
             <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
               <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
@@ -1136,7 +1173,7 @@ export default function Home() {
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
             <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>{renderDayItems(activeDay)}
             <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & mock pay <ArrowRight size={15} /></button>
-            <button className="continue-button" onClick={() => { setShowMobilePlan(false); document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }); }}>Keep exploring <ArrowRight size={16} /></button>
+            <button className="continue-button" onClick={() => closeMobilePlan(() => document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }))}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
         </div>
       )}
