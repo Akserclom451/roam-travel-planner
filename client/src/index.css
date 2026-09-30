@@ -72,6 +72,7 @@
 .reveal-on-scroll.is-revealed {
   opacity: 1;
   transform: translateY(0);
+  will-change: auto;
 }
 
 .reveal-on-scroll .destination-chip,
