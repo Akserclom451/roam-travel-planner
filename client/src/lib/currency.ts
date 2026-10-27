@@ -33,8 +33,8 @@ export interface RatesState {
 export const DEFAULT_RATES_STATE: RatesState = {
   rates: {
     EUR: 1,
-    JPY: 1,
-    ISK: 1,
+    JPY: 0,
+    ISK: 0,
   },
   date: null,
   status: "loading",
@@ -219,11 +219,18 @@ export function getConversionRate(
   }
 
   const rate = ratesState.rates[targetCurrency];
-  if (typeof rate === "number" && Number.isFinite(rate) && rate > 0 && ratesState.status !== "fallback") {
+  const hasValidRate =
+    typeof rate === "number" &&
+    Number.isFinite(rate) &&
+    rate > 0 &&
+    ratesState.date !== null &&
+    ratesState.status !== "fallback";
+
+  if (hasValidRate) {
     return { rate, effectiveCurrency: targetCurrency, isConverted: true };
   }
 
-  // Safe fallback: when conversion rate is missing/failed, display in base EUR
+  // Safe fallback: when conversion rate is missing/failed/loading without cache, display in base EUR
   // to avoid ever showing unconverted amounts with a misleading foreign currency symbol.
   return { rate: 1, effectiveCurrency: "EUR", isConverted: false };
 }
@@ -324,7 +331,7 @@ export function calculateItineraryAmounts(
  * Generates honest status labels for reference rates.
  */
 export function getRateStatusDescription(ratesState: RatesState, selectedCurrency: CurrencyCode): string {
-  if (selectedCurrency === "EUR") {
+  if (selectedCurrency === "EUR" && ratesState.status !== "loading") {
     return "Base reference currency (EUR)";
   }
 
@@ -338,7 +345,9 @@ export function getRateStatusDescription(ratesState: RatesState, selectedCurrenc
         ? `Stale reference rate from ${ratesState.date} (cached, refresh failed) · Planning estimates`
         : "Stale reference rate (cached, refresh failed) · Planning estimates";
     case "loading":
-      return "Fetching reference exchange rates...";
+      return ratesState.date
+        ? `Fetching reference exchange rates (using cached rate from ${ratesState.date})...`
+        : "Fetching reference exchange rates · Displaying base EUR estimates";
     case "fallback":
     default:
       return "Live conversion unavailable · Displaying base EUR estimates";

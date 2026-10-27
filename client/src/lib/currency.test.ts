@@ -7,6 +7,7 @@ import {
   parseFrankfurterResponse,
   getRateStatusDescription,
   CURRENCIES,
+  DEFAULT_RATES_STATE,
   type RatesState,
 } from "./currency";
 
@@ -109,6 +110,56 @@ describe("ROAM Currency & Pricing Logic", () => {
       expect(fallbackConversion.effectiveCurrency).toBe("EUR");
       expect(fallbackConversion.formatted).toBe("€42");
       expect(fallbackConversion.isConverted).toBe(false);
+    });
+
+    it("regression test: loading state without cache never converts JPY/ISK with 1:1 rate", () => {
+      // 1. Test DEFAULT_RATES_STATE (initial state on mount before network responds)
+      const defaultStateConversion = formatEurPrice(42, "JPY", DEFAULT_RATES_STATE);
+      expect(defaultStateConversion.effectiveCurrency).toBe("EUR");
+      expect(defaultStateConversion.formatted).toBe("€42");
+      expect(defaultStateConversion.isConverted).toBe(false);
+
+      const iskDefaultConversion = formatEurPrice(86, "ISK", DEFAULT_RATES_STATE);
+      expect(iskDefaultConversion.effectiveCurrency).toBe("EUR");
+      expect(iskDefaultConversion.formatted).toBe("€86");
+      expect(iskDefaultConversion.isConverted).toBe(false);
+
+      // 2. Test uninitialized rates where rates were 1 but date was null and status was loading
+      const mockUninitializedLoading: RatesState = {
+        rates: { EUR: 1, JPY: 1, ISK: 1 },
+        date: null,
+        status: "loading",
+        lastUpdated: null,
+      };
+      const uninitJpy = formatEurPrice(42, "JPY", mockUninitializedLoading);
+      expect(uninitJpy.effectiveCurrency).toBe("EUR");
+      expect(uninitJpy.formatted).toBe("€42");
+      expect(uninitJpy.formatted).not.toBe("¥42");
+      expect(uninitJpy.isConverted).toBe(false);
+
+      const uninitIsk = formatEurPrice(86, "ISK", mockUninitializedLoading);
+      expect(uninitIsk.effectiveCurrency).toBe("EUR");
+      expect(uninitIsk.formatted).toBe("€86");
+      expect(uninitIsk.formatted).not.toContain("kr 86");
+      expect(uninitIsk.isConverted).toBe(false);
+    });
+
+    it("preserves valid cached rates during background refresh loading state", () => {
+      // When background re-fetching happens while valid cached rates exist
+      const mockRefreshingCachedState: RatesState = {
+        rates: { EUR: 1, JPY: 176.18, ISK: 136.54 },
+        date: "2026-10-26",
+        status: "loading",
+        lastUpdated: Date.now() - 3600000,
+      };
+
+      const result = formatEurPrice(42, "JPY", mockRefreshingCachedState);
+      expect(result.effectiveCurrency).toBe("JPY");
+      expect(result.formatted).toBe("¥7,400");
+      expect(result.isConverted).toBe(true);
+
+      const statusDesc = getRateStatusDescription(mockRefreshingCachedState, "JPY");
+      expect(statusDesc).toContain("2026-10-26");
     });
 
     it("honestly marks stale rates with cached date", () => {
