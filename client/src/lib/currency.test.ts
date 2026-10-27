@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatCurrency,
   formatEurPrice,
+  formatExchangeRate,
   getConversionRate,
   calculateItineraryAmounts,
   parseFrankfurterResponse,
@@ -267,6 +268,70 @@ describe("ROAM Currency & Pricing Logic", () => {
 
       // Same currency returns original amount
       expect(convertBudgetBetweenCurrencies(500, "EUR", "EUR", mockLiveRatesState)).toBe(500);
+    });
+
+    it("formats exchange rates with 2 decimal places", () => {
+      expect(formatExchangeRate(176.18, "JPY")).toBe("¥176.18");
+      expect(formatExchangeRate(136.54, "ISK")).toBe("kr 136.54");
+    });
+
+    it("describes cached rate status accurately without mentioning failure", () => {
+      const cachedState: RatesState = {
+        rates: { EUR: 1, JPY: 176.18, ISK: 136.54 },
+        date: "2026-10-26",
+        status: "cached",
+        lastUpdated: 1700000000000,
+      };
+      const desc = getRateStatusDescription(cachedState, "JPY");
+      expect(desc).toContain("2026-10-26");
+      expect(desc.toLowerCase()).toContain("cached");
+      expect(desc.toLowerCase()).not.toContain("failed");
+    });
+
+    it("computes unitPrices and lineTotals for 3 x kyoto-tea in JPY with sum matching totalCost", () => {
+      const singleActivityItinerary = {
+        "Day 1": [{ activityId: "kyoto-tea", quantity: 3 }],
+        "Day 2": [],
+        "Day 3": [],
+      };
+      const result = calculateItineraryAmounts(
+        singleActivityItinerary,
+        [{ id: "kyoto-tea", price: 42 }],
+        "JPY",
+        mockLiveRatesState
+      );
+      // unit price = Math.round(42 * 176.18) = 7400
+      expect(result.unitPrices["kyoto-tea"]).toBe(7400);
+      // line total = 7400 * 3 = 22200
+      expect(result.lineTotals["Day 1-kyoto-tea"]).toBe(22200);
+      expect(result.daySubtotals["Day 1"]).toBe(22200);
+      expect(result.totalCost).toBe(22200);
+      const sumOfLines = Object.values(result.lineTotals).reduce((a, b) => a + b, 0);
+      expect(sumOfLines).toBe(result.totalCost);
+    });
+
+    it("round-trips budget conversion JPY -> EUR -> JPY within 1 of original 100,000", () => {
+      const eur = convertBudgetBetweenCurrencies(100000, "JPY", "EUR", mockLiveRatesState);
+      expect(eur).not.toBeNull();
+      const jpy = convertBudgetBetweenCurrencies(eur!, "EUR", "JPY", mockLiveRatesState);
+      expect(jpy).not.toBeNull();
+      expect(Math.abs(jpy! - 100000)).toBeLessThanOrEqual(1);
+    });
+
+    it("evaluates boundary comparison correctly: 22199 is exceeded (1 over) and 22200 is within (0 left)", () => {
+      const exceededRes = compareBudget("22199", "JPY", 126, 22200, "JPY", mockLiveRatesState);
+      expect(exceededRes.status).toBe("exceeded");
+      expect(exceededRes.summaryText).toContain("1 over");
+
+      const withinRes = compareBudget("22200", "JPY", 126, 22200, "JPY", mockLiveRatesState);
+      expect(withinRes.status).toBe("within");
+      expect(withinRes.summaryText).toContain("0 left");
+    });
+
+    it("marks compareBudget as unavailable when budget is JPY and rates are in fallback", () => {
+      const res = compareBudget("25000", "JPY", 126, 126, "EUR", mockFallbackRatesState);
+      expect(res.status).toBe("unavailable");
+      expect(res.isComparisonAvailable).toBe(false);
     });
   });
 });

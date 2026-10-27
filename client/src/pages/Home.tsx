@@ -31,7 +31,6 @@ import {
   DEFAULT_RATES_STATE,
   calculateItineraryAmounts,
   compareBudget,
-  convertBudgetBetweenCurrencies,
   fetchExchangeRates,
   formatCurrency,
   formatExchangeRate,
@@ -400,7 +399,6 @@ export default function Home() {
   });
   const [budgetInput, setBudgetInput] = useState("");
   const [budgetCurrency, setBudgetCurrency] = useState<CurrencyCode>("JPY");
-  const previousDisplayCurrency = useRef<CurrencyCode>("JPY");
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [isMobilePlanClosing, setIsMobilePlanClosing] = useState(false);
   const mobilePlanCloseTimeout = useRef<number | null>(null);
@@ -486,25 +484,12 @@ export default function Home() {
   const totalCost = itineraryAmounts.totalCost;
   const totalCostEur = itineraryAmounts.totalCostEur;
 
-  // Handle currency conversion of budget input when display currency changes
+  // Keep only: when budgetInput is empty, keep budgetCurrency synced to displayCurrency.
   useEffect(() => {
-    const prev = previousDisplayCurrency.current;
-    if (prev !== displayCurrency) {
-      previousDisplayCurrency.current = displayCurrency;
-      if (budgetInput.trim() !== "") {
-        const num = Number(budgetInput);
-        if (Number.isFinite(num) && num > 0) {
-          const converted = convertBudgetBetweenCurrencies(num, budgetCurrency, displayCurrency, ratesState);
-          if (converted !== null) {
-            setBudgetInput(String(converted));
-            setBudgetCurrency(displayCurrency);
-          }
-        }
-      } else {
-        setBudgetCurrency(displayCurrency);
-      }
+    if (budgetInput.trim() === "") {
+      setBudgetCurrency(displayCurrency);
     }
-  }, [displayCurrency, budgetCurrency, budgetInput, ratesState]);
+  }, [displayCurrency, budgetInput]);
 
   // Synchronize currency selector with fallback lock
   useEffect(() => {
@@ -513,7 +498,7 @@ export default function Home() {
     }
   }, [ratesState.status, currencyCode]);
 
-  const formatEurPrice = (priceEur: number) => formatCurrency(priceEur * rate, displayCurrency);
+  const formatEurPrice = (priceEur: number) => formatCurrency(getConvertedUnitPrice(priceEur, rate), displayCurrency);
   const formatAmount = (amount: number) => formatCurrency(amount, displayCurrency);
 
   const budgetComparison = useMemo(() => {
@@ -1158,7 +1143,7 @@ export default function Home() {
             </div>
             <div className={`budget-card ${budgetComparison.status}`}>
               <div className="budget-heading"><span>Trip budget</span><strong>{budgetComparison.statusHeading}</strong></div>
-              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { setBudgetInput(event.target.value); setBudgetCurrency(displayCurrency); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
+              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { const value = event.target.value; if (budgetInput.trim() === "") { setBudgetCurrency(displayCurrency); } setBudgetInput(value); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
               <div className="budget-meter"><span style={{ width: `${budgetComparison.meterPercent}%` }} /></div>
               <small>{budgetComparison.summaryText}</small>
             </div>
@@ -1200,16 +1185,12 @@ export default function Home() {
             </nav>
             {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => requestLoadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
             <div className="menu-settings">
-              <button className="menu-setting currency-control" onClick={() => setCurrencyCode(currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length])}><span>05</span><strong>Currency</strong><b>{displayCurrency} ({CURRENCIES[displayCurrency].symbol})</b></button>
+              <button className={`menu-setting currency-control ${ratesState.status === "fallback" ? "is-locked" : ""}`} onClick={handleCycleCurrency}><span>05</span><strong>Currency</strong><b>{displayCurrency} ({CURRENCIES[displayCurrency].symbol})</b></button>
               <div className="menu-rate-info">
                 <small>
                   {displayCurrency === "EUR"
                     ? "Base currency (EUR) · Planning estimates"
-                    : ratesState.status === "live" && ratesState.date
-                    ? `1 EUR = ${formatCurrency(rate, displayCurrency)} · ECB reference ${ratesState.date}`
-                    : ratesState.status === "stale" && ratesState.date
-                    ? `1 EUR = ${formatCurrency(rate, displayCurrency)} · Cached ECB rate ${ratesState.date}`
-                    : "Live rates unavailable · Displaying base EUR"}
+                    : `1 EUR = ${formatExchangeRate(rate, displayCurrency)} · ${getRateStatusDescription(ratesState, displayCurrency)}`}
                 </small>
               </div>
               <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>06</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
@@ -1275,7 +1256,7 @@ export default function Home() {
             </div>
             <div className={`budget-card ${budgetComparison.status}`}>
               <div className="budget-heading"><span>Trip budget</span><strong>{budgetComparison.statusHeading}</strong></div>
-              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { setBudgetInput(event.target.value); setBudgetCurrency(displayCurrency); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
+              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { const value = event.target.value; if (budgetInput.trim() === "") { setBudgetCurrency(displayCurrency); } setBudgetInput(value); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
               <div className="budget-meter"><span style={{ width: `${budgetComparison.meterPercent}%` }} /></div>
               <small>{budgetComparison.summaryText}</small>
             </div>
@@ -1320,7 +1301,25 @@ export default function Home() {
                   {dayIds.map((day) => {
                     const dayItems = checkoutItems.filter((entry) => entry.day === day);
                     if (!dayItems.length) return null;
-                    return <div className="checkout-day" key={day}><div className="checkout-day-heading"><strong>{day}</strong><span>{formatAmount(daySubtotals[day])}</span></div>{dayItems.map(({ item, activity }) => <div className="checkout-item" key={`${day}-${activity.id}`}><img src={activity.image} alt="" /><div><strong>{activity.name}</strong><small>{item.quantity} × {formatEurPrice(activity.price)} · {activity.duration}</small></div><b>{formatEurPrice(activity.price * item.quantity)}</b></div>)}</div>;
+                    return (
+                      <div className="checkout-day" key={day}>
+                        <div className="checkout-day-heading"><strong>{day}</strong><span>{formatAmount(daySubtotals[day])}</span></div>
+                        {dayItems.map(({ item, activity }) => {
+                          const unit = itineraryAmounts.unitPrices[activity.id] ?? getConvertedUnitPrice(activity.price, rate);
+                          const line = itineraryAmounts.lineTotals[`${day}-${activity.id}`] ?? getConvertedLineTotal(activity.price, item.quantity, rate);
+                          return (
+                            <div className="checkout-item" key={`${day}-${activity.id}`}>
+                              <img src={activity.image} alt="" />
+                              <div>
+                                <strong>{activity.name}</strong>
+                                <small>{item.quantity} × {formatCurrency(unit, displayCurrency)} · {activity.duration}</small>
+                              </div>
+                              <b>{formatCurrency(line, displayCurrency)}</b>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
                   })}
                 </div>
                 <div className="checkout-total"><span>Estimated total</span><strong>{formatAmount(totalCost)}</strong></div>

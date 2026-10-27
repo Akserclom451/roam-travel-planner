@@ -528,18 +528,20 @@ export function compareBudget(
     };
   }
 
-  // Compare in base EUR
-  const exceeded = totalCostEur > budgetEur;
+  const { rate: displayRate } = getConversionRate(displayCurrency, ratesState);
+  const budgetInDisplayCurrency =
+    budgetCurrency === displayCurrency
+      ? budgetNumber
+      : Math.round(budgetEur * displayRate);
+
+  const exceeded = totalCostInDisplayCurrency > budgetInDisplayCurrency;
+  const diffInDisplayCurrency = Math.abs(totalCostInDisplayCurrency - budgetInDisplayCurrency);
   const meterPercent =
-    budgetEur === 0
-      ? totalCostEur > 0
+    budgetInDisplayCurrency === 0
+      ? totalCostInDisplayCurrency > 0
         ? 100
         : 0
-      : Math.min(100, (totalCostEur / budgetEur) * 100);
-
-  const { rate: displayRate } = getConversionRate(displayCurrency, ratesState);
-  const budgetInDisplayCurrency = Math.round(budgetEur * displayRate);
-  const diffInDisplayCurrency = Math.abs(totalCostInDisplayCurrency - budgetInDisplayCurrency);
+      : Math.min(100, (totalCostInDisplayCurrency / budgetInDisplayCurrency) * 100);
 
   let summaryText = "";
   if (budgetCurrency === displayCurrency) {
@@ -573,7 +575,7 @@ export function compareBudget(
 }
 
 /**
- * Converts a budget amount between currencies without precision loss.
+ * Converts a budget amount between currencies.
  */
 export function convertBudgetBetweenCurrencies(
   amount: number,
@@ -602,7 +604,7 @@ export function convertBudgetBetweenCurrencies(
   if (amountEur === null) return null;
 
   if (toCurrency === "EUR") {
-    return Math.round(amountEur);
+    return Math.round(amountEur * 100) / 100;
   }
   const rateTo = ratesState.rates[toCurrency];
   if (
