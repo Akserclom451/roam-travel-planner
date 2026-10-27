@@ -23,6 +23,20 @@ import {
   X,
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
+import {
+  type CurrencyCode,
+  type RatesState,
+  CURRENCIES,
+  CURRENCY_OPTIONS,
+  DEFAULT_RATES_STATE,
+  calculateItineraryAmounts,
+  fetchExchangeRates,
+  formatCurrency,
+  getConversionRate,
+  getRateStatusDescription,
+  loadCachedRates,
+  saveCachedRates,
+} from "@/lib/currency";
 
 type DestinationId = "kyoto" | "lisbon" | "reykjavik";
 type DayId = "Day 1" | "Day 2" | "Day 3";
@@ -30,11 +44,9 @@ type Category = "All" | "Culture" | "Food" | "Outdoors" | "Slow travel";
 type PriceFilter = "All" | "under30" | "30to70" | "over70";
 
 type Currency = {
-  code: string;
+  code: CurrencyCode;
   symbol: string;
 };
-
-type CurrencyCode = "JPY" | "EUR" | "ISK";
 
 type SavedPlan = {
   id: string;
@@ -339,21 +351,13 @@ function getSchedule(activity: Activity): ActivitySchedule {
 const dayIds: DayId[] = ["Day 1", "Day 2", "Day 3"];
 const categories: Category[] = ["All", "Culture", "Food", "Outdoors", "Slow travel"];
 const priceFilters: PriceFilter[] = ["All", "under30", "30to70", "over70"];
-const currencies: Record<CurrencyCode, Currency> = {
-  JPY: { code: "JPY", symbol: "¥" },
-  EUR: { code: "EUR", symbol: "€" },
-  ISK: { code: "ISK", symbol: "kr" },
-};
-const currencyOptions: CurrencyCode[] = ["JPY", "EUR", "ISK"];
+const currencies: Record<CurrencyCode, Currency> = CURRENCIES;
+const currencyOptions: CurrencyCode[] = CURRENCY_OPTIONS;
 
-function formatPrice(price: number, currency: Currency) {
-  return currency.code === "ISK" ? `${currency.symbol} ${price}` : `${currency.symbol}${price}`;
-}
-
-function getPriceFilterLabel(filter: PriceFilter, currency: Currency) {
-  if (filter === "under30") return `Under ${formatPrice(30, currency)}`;
-  if (filter === "30to70") return `${formatPrice(30, currency)}–${formatPrice(70, currency)}`;
-  if (filter === "over70") return `${formatPrice(70, currency)}+`;
+function getPriceFilterLabel(filter: PriceFilter, displayCurrency: CurrencyCode, rate: number) {
+  if (filter === "under30") return `Under ${formatCurrency(30 * rate, displayCurrency)}`;
+  if (filter === "30to70") return `${formatCurrency(30 * rate, displayCurrency)}–${formatCurrency(70 * rate, displayCurrency)}`;
+  if (filter === "over70") return `${formatCurrency(70 * rate, displayCurrency)}+`;
   return "All";
 }
 
@@ -400,7 +404,50 @@ export default function Home() {
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const noticeTimer = useRef<number | null>(null);
 
-  const selectedCurrency = currencies[currencyCode];
+  const [ratesState, setRatesState] = useState<RatesState>(() => {
+    const cached = loadCachedRates();
+    return cached ?? DEFAULT_RATES_STATE;
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchExchangeRates()
+      .then(({ rates, date }) => {
+        if (!isMounted) return;
+        setRatesState({
+          rates,
+          date,
+          status: "live",
+          lastUpdated: Date.now(),
+        });
+        saveCachedRates(rates, date);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        setRatesState((current) => {
+          if (current.rates.JPY > 1 && current.rates.ISK > 1) {
+            return {
+              ...current,
+              status: "stale",
+              errorMessage: err instanceof Error ? err.message : String(err),
+            };
+          }
+          return {
+            ...current,
+            status: "fallback",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          };
+        });
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const conversion = getConversionRate(currencyCode, ratesState);
+  const displayCurrency: CurrencyCode = conversion.effectiveCurrency;
+  const rate = conversion.rate;
+  const selectedCurrency = CURRENCIES[displayCurrency];
   const destination = { ...(destinations.find((item) => item.id === selectedDestination) ?? destinations[0]), currency: selectedCurrency };
   const activities = activityData[selectedDestination];
   const selectedActivity = activities.find((activity) => activity.id === selectedActivityId) ?? null;
@@ -409,14 +456,18 @@ export default function Home() {
   const checkoutItems = useMemo(() => dayIds.flatMap((day) => itinerary[day]
     .map((item) => ({ day, item, activity: activities.find((candidate) => candidate.id === item.activityId) }))
     .filter((entry): entry is { day: DayId; item: PlannedActivity; activity: Activity } => Boolean(entry.activity))), [activities, itinerary]);
-  const daySubtotals = useMemo(() => dayIds.reduce<Record<DayId, number>>((totals, day) => {
-    totals[day] = itinerary[day].reduce((sum, item) => {
-      const activity = activities.find((candidate) => candidate.id === item.activityId);
-      return sum + (activity ? activity.price * item.quantity : 0);
-    }, 0);
-    return totals;
-  }, { "Day 1": 0, "Day 2": 0, "Day 3": 0 }), [activities, itinerary]);
-  const totalCost = Object.values(daySubtotals).reduce((sum, subtotal) => sum + subtotal, 0);
+
+  const itineraryAmounts = useMemo(
+    () => calculateItineraryAmounts(itinerary, activities, currencyCode, ratesState),
+    [itinerary, activities, currencyCode, ratesState]
+  );
+  const daySubtotals = itineraryAmounts.daySubtotals as Record<DayId, number>;
+  const totalCost = itineraryAmounts.totalCost;
+  const totalCostEur = itineraryAmounts.totalCostEur;
+
+  const formatEurPrice = (priceEur: number) => formatCurrency(priceEur * rate, displayCurrency);
+  const formatAmount = (amount: number) => formatCurrency(amount, displayCurrency);
+
   const budget = budgetInput.trim() === "" ? null : Math.max(0, Number(budgetInput) || 0);
   const budgetExceeded = budget !== null && totalCost > budget;
   const budgetPercent = budget === null || budget === 0 ? (totalCost > 0 ? 100 : 0) : Math.min(100, (totalCost / budget) * 100);
@@ -832,7 +883,7 @@ export default function Home() {
             <div className="day-item-copy">
               <span>{activity.category}</span>
               <strong>{activity.name}</strong>
-              <small>{getSchedule(activity).label} · {activity.duration} · {formatPrice(activity.price * item.quantity, destination.currency)}</small>
+              <small>{getSchedule(activity).label} · {activity.duration} · {formatEurPrice(activity.price * item.quantity)}</small>
               <div className="quantity-control" aria-label={`Quantity for ${activity.name}`}>
                 <button type="button" onClick={(event) => { event.stopPropagation(); updateQuantity(activity.id, day, -1); }} disabled={item.quantity <= 1} aria-label={`Decrease ${activity.name} quantity`}>−</button>
                 <span>{item.quantity}</span>
@@ -940,7 +991,7 @@ export default function Home() {
         </section>
 
         <div className="mobile-summary-bar">
-          <div><span>{selectedIds.length} {selectedIds.length === 1 ? "activity" : "activities"}</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div>
+          <div><span>{selectedIds.length} {selectedIds.length === 1 ? "activity" : "activities"}</span><strong>{formatAmount(totalCost)}</strong></div>
           <button onClick={openMobilePlan}>View itinerary <ArrowRight size={15} /></button>
         </div>
 
@@ -970,7 +1021,7 @@ export default function Home() {
               </div>
               <div className="filter-group">
                 <div className="filter-label"><Wallet size={13} /> Price</div>
-              <div className="filter-options">{priceFilters.map((item) => <button key={item} className={priceFilter === item ? "active" : ""} onClick={() => setPriceFilter(item)}>{getPriceFilterLabel(item, destination.currency)}</button>)}</div>
+              <div className="filter-options">{priceFilters.map((item) => <button key={item} className={priceFilter === item ? "active" : ""} onClick={() => setPriceFilter(item)}>{getPriceFilterLabel(item, displayCurrency, rate)}</button>)}</div>
               </div>
               {(selectedCategories.length > 0 || priceFilter !== "All" || activityQuery) && <button className="reset-filters" onClick={resetFilters}>Reset filters <X size={13} /></button>}
             </div>
@@ -1000,7 +1051,7 @@ export default function Home() {
                         <div className="activity-location"><MapPin size={12} /> {activity.location}</div>
                         <h3>{activity.name}</h3>
                         <p>{activity.description}</p>
-                        <div className="activity-card-footer"><span><Clock3 size={13} /> {activity.duration}</span><strong>{formatPrice(activity.price, destination.currency)}</strong><ChevronRight size={16} className="card-arrow" /></div>
+                        <div className="activity-card-footer"><span><Clock3 size={13} /> {activity.duration}</span><strong>{formatEurPrice(activity.price)}</strong><ChevronRight size={16} className="card-arrow" /></div>
                       </div>
                     </article>
                   );
@@ -1014,18 +1065,25 @@ export default function Home() {
           <aside className="itinerary-rail" id="itinerary" aria-label="Your itinerary">
             <div className="rail-topline"><span className="section-kicker">Your trip</span><span className="rail-private-note">Private plan</span></div>
             <div className="rail-title-row"><h2>{destination.name}, slowly.</h2><span className="rail-days">3 days</span></div>
-            <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className="rail-total"><div><span>Estimated total</span><strong>{formatAmount(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className="rate-status-banner">
+              <strong>{getRateStatusDescription(ratesState, displayCurrency)}</strong>
+              {displayCurrency !== "EUR" && ratesState.rates[displayCurrency] && ratesState.status !== "fallback" && (
+                <span>1 EUR = {formatCurrency(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
+              )}
+              <small>Planning estimates only · Supplier rates may vary</small>
+            </div>
             <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
               <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
-              <div className="budget-input-row"><span>{destination.currency.symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${destination.currency.code}`} /></div>
+              <div className="budget-input-row"><span>{CURRENCIES[displayCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${displayCurrency}`} /></div>
               <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
-              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatPrice(totalCost, destination.currency)} of ${formatPrice(budget, destination.currency)} · ${budgetExceeded ? formatPrice(totalCost - budget, destination.currency) + " over" : formatPrice(budget - totalCost, destination.currency) + " left"}`}</small>
+              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatAmount(totalCost)} of ${formatAmount(budget)} · ${budgetExceeded ? formatAmount(totalCost - budget) + " over" : formatAmount(budget - totalCost) + " left"}`}</small>
             </div>
             {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs" role="tablist" aria-label="Trip days">
               {dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)} role="tab" aria-selected={activeDay === day}><span>0{index + 1}</span>{day.replace(" ", " ")}{itinerary[day].length > 0 && <i>{itinerary[day].length}</i>}</button>)}
             </div>
-            <div className="selected-day-label"><span>{activeDay}</span><div><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>
+            <div className="selected-day-label"><span>{activeDay}</span><div><small>{draggingActivityId ? "Drop on a day tab to move" : activeDay === "Day 1" ? "Arrive & orient" : activeDay === "Day 2" ? "Go a little deeper" : "Leave room for one more thing"}</small><strong>{formatAmount(daySubtotals[activeDay])}</strong></div></div>
             {renderDayItems(activeDay)}
             <div className="rail-tip"><Sparkles size={15} /><span><strong>Leave 20% unplanned.</strong><br />The best moments rarely make the first draft.</span></div>
             <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & checkout <ArrowRight size={15} /></button>
@@ -1059,7 +1117,18 @@ export default function Home() {
             </nav>
             {showSavedPlans && <div className="saved-plans-list">{savedPlans.length === 0 ? <p>No saved plans yet. Save an itinerary to find it here.</p> : savedPlans.map((plan) => { const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0]; return <div className="saved-plan-row" key={plan.id}><button onClick={() => requestLoadSavedPlan(plan)}><strong>{savedDestination.name}, slowly.</strong><small>{Object.values(plan.itinerary).flat().length} activities · {new Date(plan.createdAt).toLocaleDateString()}</small></button><button className="saved-plan-delete" aria-label={`Delete ${savedDestination.name} saved plan`} onClick={() => deleteSavedPlan(plan.id)}><Trash2 size={14} /></button></div>; })}</div>}
             <div className="menu-settings">
-              <button className="menu-setting currency-control" onClick={() => setCurrencyCode(currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length])}><span>05</span><strong>Currency</strong><b>{selectedCurrency.code} ({selectedCurrency.symbol})</b></button>
+              <button className="menu-setting currency-control" onClick={() => setCurrencyCode(currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length])}><span>05</span><strong>Currency</strong><b>{displayCurrency} ({CURRENCIES[displayCurrency].symbol})</b></button>
+              <div className="menu-rate-info">
+                <small>
+                  {displayCurrency === "EUR"
+                    ? "Base currency (EUR) · Planning estimates"
+                    : ratesState.status === "live" && ratesState.date
+                    ? `1 EUR = ${formatCurrency(rate, displayCurrency)} · ECB reference ${ratesState.date}`
+                    : ratesState.status === "stale" && ratesState.date
+                    ? `1 EUR = ${formatCurrency(rate, displayCurrency)} · Cached ECB rate ${ratesState.date}`
+                    : "Live rates unavailable · Displaying base EUR"}
+                </small>
+              </div>
               <button className="menu-setting menu-toggle" onClick={() => toggleTheme?.()}><span>06</span><strong>Dark mode</strong><b>{theme === "dark" ? "On" : "Off"}</b></button>
               <button className={`menu-setting menu-toggle ${reduceMotion ? "active" : ""}`} onClick={() => setReduceMotion((current) => !current)}><span>07</span><strong>Reduce motion</strong><b>{reduceMotion ? "On" : "Off"}</b></button>
             </div>
@@ -1101,7 +1170,7 @@ export default function Home() {
               <div className="activity-location"><MapPin size={13} /> {selectedActivity.location}</div>
               <h2>{selectedActivity.name}</h2>
               <p className="detail-description">{selectedActivity.details}</p>
-              <div className="detail-facts"><span><Clock3 size={15} /><strong>{getSchedule(selectedActivity).label} · {selectedActivity.duration}</strong><small>Time & duration</small></span><span><Wallet size={15} /><strong>{formatPrice(selectedActivity.price, destination.currency)}</strong><small>Per person · {destination.currency.code}</small></span></div>
+              <div className="detail-facts"><span><Clock3 size={15} /><strong>{getSchedule(selectedActivity).label} · {selectedActivity.duration}</strong><small>Time & duration</small></span><span><Wallet size={15} /><strong>{formatEurPrice(selectedActivity.price)}</strong><small>Per person (estimate) · {displayCurrency}</small>{displayCurrency !== "EUR" && <span className="detail-rate-note">Base: €{selectedActivity.price}</span>}</span></div>
               <div className="add-section"><span className="add-label">Add to your trip</span><div className="detail-day-picker">{dayIds.map((day) => <button key={day} className={activeDay === day ? "active" : ""} onClick={() => setActiveDay(day)}>{day}<span>{itinerary[day].some((item) => item.activityId === selectedActivity.id) ? <Check size={14} /> : <Plus size={14} />}</span></button>)}</div><button className="add-primary" onClick={() => addToDay(selectedActivity.id, activeDay)}>{itinerary[activeDay].some((item) => item.activityId === selectedActivity.id) ? <><Check size={16} /> Added to {activeDay}</> : <>Add to {activeDay} <ArrowRight size={16} /></>}</button></div>
               {selectedIds.includes(selectedActivity.id) && <p className="detail-note"><Check size={14} /> In your itinerary · {dayIds.find((day) => itinerary[day].some((item) => item.activityId === selectedActivity.id))}</p>}
             </div>
@@ -1113,16 +1182,23 @@ export default function Home() {
         <div className={`mobile-plan-overlay ${isMobilePlanClosing ? "is-closing" : ""}`} onClick={() => closeMobilePlan()}>
           <aside className={`mobile-plan-sheet ${isMobilePlanClosing ? "is-closing" : ""}`} onClick={(event) => event.stopPropagation()} aria-label="Mobile itinerary">
             <div className="sheet-handle" /><div className="sheet-header"><div><span className="section-kicker">Your trip</span><h2>{destination.name}, slowly.</h2></div><button className="icon-button" onClick={() => closeMobilePlan()} aria-label="Close itinerary"><X size={18} /></button></div>
-            <div className="rail-total"><div><span>Estimated total</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className="rail-total"><div><span>Estimated total</span><strong>{formatAmount(totalCost)}</strong></div><div className="rail-count"><span>{selectedIds.length}</span> {selectedIds.length === 1 ? "activity" : "activities"}</div></div>
+            <div className="rate-status-banner">
+              <strong>{getRateStatusDescription(ratesState, displayCurrency)}</strong>
+              {displayCurrency !== "EUR" && ratesState.rates[displayCurrency] && ratesState.status !== "fallback" && (
+                <span>1 EUR = {formatCurrency(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
+              )}
+              <small>Planning estimates only · Supplier rates may vary</small>
+            </div>
             <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
               <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
-              <div className="budget-input-row"><span>{destination.currency.symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${destination.currency.code}`} /></div>
+              <div className="budget-input-row"><span>{CURRENCIES[displayCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${displayCurrency}`} /></div>
               <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
-              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatPrice(totalCost, destination.currency)} of ${formatPrice(budget, destination.currency)} · ${budgetExceeded ? formatPrice(totalCost - budget, destination.currency) + " over" : formatPrice(budget - totalCost, destination.currency) + " left"}`}</small>
+              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatAmount(totalCost)} of ${formatAmount(budget)} · ${budgetExceeded ? formatAmount(totalCost - budget) + " over" : formatAmount(budget - totalCost) + " left"}`}</small>
             </div>
             {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>
-            <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatPrice(daySubtotals[activeDay], destination.currency)}</strong></div></div>{renderDayItems(activeDay)}
+            <div className="selected-day-label"><span>{activeDay}</span><div><small>Tap an activity to edit quantity</small><strong>{formatAmount(daySubtotals[activeDay])}</strong></div></div>{renderDayItems(activeDay)}
             <button className="checkout-button" onClick={openCheckout}><Wallet size={15} /> Review & checkout <ArrowRight size={15} /></button>
             <button className="continue-button" onClick={() => closeMobilePlan(() => document.getElementById("explore")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }))}>Keep exploring <ArrowRight size={16} /></button>
           </aside>
@@ -1161,10 +1237,11 @@ export default function Home() {
                   {dayIds.map((day) => {
                     const dayItems = checkoutItems.filter((entry) => entry.day === day);
                     if (!dayItems.length) return null;
-                    return <div className="checkout-day" key={day}><div className="checkout-day-heading"><strong>{day}</strong><span>{formatPrice(daySubtotals[day], destination.currency)}</span></div>{dayItems.map(({ item, activity }) => <div className="checkout-item" key={`${day}-${activity.id}`}><img src={activity.image} alt="" /><div><strong>{activity.name}</strong><small>{item.quantity} × {formatPrice(activity.price, destination.currency)} · {activity.duration}</small></div><b>{formatPrice(activity.price * item.quantity, destination.currency)}</b></div>)}</div>;
+                    return <div className="checkout-day" key={day}><div className="checkout-day-heading"><strong>{day}</strong><span>{formatAmount(daySubtotals[day])}</span></div>{dayItems.map(({ item, activity }) => <div className="checkout-item" key={`${day}-${activity.id}`}><img src={activity.image} alt="" /><div><strong>{activity.name}</strong><small>{item.quantity} × {formatEurPrice(activity.price)} · {activity.duration}</small></div><b>{formatEurPrice(activity.price * item.quantity)}</b></div>)}</div>;
                   })}
                 </div>
-                <div className="checkout-total"><span>Estimated total</span><strong>{formatPrice(totalCost, destination.currency)}</strong></div>
+                <div className="checkout-total"><span>Estimated total</span><strong>{formatAmount(totalCost)}</strong></div>
+                <div className="checkout-rate-note"><small>{getRateStatusDescription(ratesState, displayCurrency)} · All amounts are indicative planning estimates and exclude supplier surcharges or local taxes.</small></div>
                 <div className="checkout-actions">
                   <button type="button" className="checkout-secondary" onClick={returnToItinerary}>Edit itinerary</button>
                   <button type="button" className="checkout-primary" onClick={() => setCheckoutStep("payment")}>View payment status <ArrowRight size={16} /></button>
@@ -1179,7 +1256,7 @@ export default function Home() {
                     <span>Selected itinerary</span>
                     <strong>{destination.name}, {destination.country} · {checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</strong>
                   </div>
-                  <b>{formatPrice(totalCost, destination.currency)}</b>
+                  <b>{formatAmount(totalCost)}</b>
                 </div>
 
                 <div className="payment-unavailable-card" role="status" aria-live="polite">
@@ -1207,7 +1284,7 @@ export default function Home() {
                     aria-disabled="true"
                     title="Payment cannot proceed until a live payment provider is connected"
                   >
-                    <Wallet size={15} /> Payment unavailable ({formatPrice(totalCost, destination.currency)})
+                    <Wallet size={15} /> Payment unavailable ({formatAmount(totalCost)})
                   </button>
                 </div>
               </div>

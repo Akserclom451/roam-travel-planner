@@ -1042,3 +1042,73 @@ h1 em { color: #d85d43; font-style: italic; }
   .reset-actions { flex-direction: column-reverse; }
   .reset-actions button { width: 100%; min-height: 45px; }
 }
+
+/* ROAM Currency & Rate Status Styles */
+.rate-status-banner {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid #d5e0d2;
+  background: rgba(255, 253, 248, 0.7);
+  font-size: 9px;
+  color: #657567;
+  line-height: 1.45;
+  border-radius: 2px;
+}
+.rate-status-banner strong {
+  display: block;
+  color: #3b5341;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.rate-status-banner small {
+  display: block;
+  color: #7b8b7d;
+  font-size: 8.5px;
+}
+.dark .rate-status-banner {
+  background: #243328;
+  border-color: #384a3c;
+  color: #a7b7a8;
+}
+.dark .rate-status-banner strong {
+  color: #dce7dc;
+}
+.dark .rate-status-banner small {
+  color: #8c9d8e;
+}
+
+.checkout-rate-note {
+  margin-top: 14px;
+  padding: 9px 12px;
+  border: 1px solid #d5e0d2;
+  background: #fbfdf9;
+  font-size: 9.5px;
+  color: #556657;
+  line-height: 1.4;
+  border-radius: 2px;
+}
+.dark .checkout-rate-note {
+  background: #243328;
+  border-color: #3d4f40;
+  color: #abbdab;
+}
+
+.menu-rate-info {
+  padding: 2px 14px 10px;
+  font-size: 9px;
+  color: #778678;
+  line-height: 1.4;
+}
+.dark .menu-rate-info {
+  color: #8fa090;
+}
+
+.detail-rate-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 8.5px;
+  color: #8a968b;
+}
+.dark .detail-rate-note {
+  color: #8fa090;
+}
