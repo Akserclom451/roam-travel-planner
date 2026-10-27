@@ -30,9 +30,14 @@ import {
   CURRENCY_OPTIONS,
   DEFAULT_RATES_STATE,
   calculateItineraryAmounts,
+  compareBudget,
+  convertBudgetBetweenCurrencies,
   fetchExchangeRates,
   formatCurrency,
+  formatExchangeRate,
   getConversionRate,
+  getConvertedLineTotal,
+  getConvertedUnitPrice,
   getRateStatusDescription,
   loadCachedRates,
   saveCachedRates,
@@ -53,8 +58,21 @@ type SavedPlan = {
   destinationId: DestinationId;
   itinerary: Record<DayId, PlannedActivity[]>;
   budgetInput: string;
+  budgetCurrency?: CurrencyCode;
   createdAt: number;
 };
+
+function normalizeSavedPlan(plan: SavedPlan): SavedPlan {
+  if (plan.budgetCurrency && (plan.budgetCurrency === "EUR" || plan.budgetCurrency === "JPY" || plan.budgetCurrency === "ISK")) {
+    return plan;
+  }
+  const defaultCurrency: CurrencyCode =
+    plan.destinationId === "kyoto" ? "JPY" : plan.destinationId === "reykjavik" ? "ISK" : "EUR";
+  return {
+    ...plan,
+    budgetCurrency: defaultCurrency,
+  };
+}
 
 type CheckoutStep = "review" | "payment";
 
@@ -381,6 +399,8 @@ export default function Home() {
     "Day 3": [],
   });
   const [budgetInput, setBudgetInput] = useState("");
+  const [budgetCurrency, setBudgetCurrency] = useState<CurrencyCode>("JPY");
+  const previousDisplayCurrency = useRef<CurrencyCode>("JPY");
   const [showMobilePlan, setShowMobilePlan] = useState(false);
   const [isMobilePlanClosing, setIsMobilePlanClosing] = useState(false);
   const mobilePlanCloseTimeout = useRef<number | null>(null);
@@ -390,7 +410,8 @@ export default function Home() {
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      return JSON.parse(localStorage.getItem("roam-saved-plans") || "[]") as SavedPlan[];
+      const raw = JSON.parse(localStorage.getItem("roam-saved-plans") || "[]") as SavedPlan[];
+      return Array.isArray(raw) ? raw.map(normalizeSavedPlan) : [];
     } catch {
       return [];
     }
@@ -425,7 +446,7 @@ export default function Home() {
       .catch((err) => {
         if (!isMounted) return;
         setRatesState((current) => {
-          if (current.rates.JPY > 1 && current.rates.ISK > 1) {
+          if (current.rates.JPY > 0 && current.rates.ISK > 0 && current.date) {
             return {
               ...current,
               status: "stale",
@@ -465,12 +486,46 @@ export default function Home() {
   const totalCost = itineraryAmounts.totalCost;
   const totalCostEur = itineraryAmounts.totalCostEur;
 
+  // Handle currency conversion of budget input when display currency changes
+  useEffect(() => {
+    const prev = previousDisplayCurrency.current;
+    if (prev !== displayCurrency) {
+      previousDisplayCurrency.current = displayCurrency;
+      if (budgetInput.trim() !== "") {
+        const num = Number(budgetInput);
+        if (Number.isFinite(num) && num > 0) {
+          const converted = convertBudgetBetweenCurrencies(num, budgetCurrency, displayCurrency, ratesState);
+          if (converted !== null) {
+            setBudgetInput(String(converted));
+            setBudgetCurrency(displayCurrency);
+          }
+        }
+      } else {
+        setBudgetCurrency(displayCurrency);
+      }
+    }
+  }, [displayCurrency, budgetCurrency, budgetInput, ratesState]);
+
+  // Synchronize currency selector with fallback lock
+  useEffect(() => {
+    if (ratesState.status === "fallback" && currencyCode !== "EUR") {
+      setCurrencyCode("EUR");
+    }
+  }, [ratesState.status, currencyCode]);
+
   const formatEurPrice = (priceEur: number) => formatCurrency(priceEur * rate, displayCurrency);
   const formatAmount = (amount: number) => formatCurrency(amount, displayCurrency);
 
-  const budget = budgetInput.trim() === "" ? null : Math.max(0, Number(budgetInput) || 0);
-  const budgetExceeded = budget !== null && totalCost > budget;
-  const budgetPercent = budget === null || budget === 0 ? (totalCost > 0 ? 100 : 0) : Math.min(100, (totalCost / budget) * 100);
+  const budgetComparison = useMemo(() => {
+    return compareBudget(
+      budgetInput,
+      budgetCurrency,
+      totalCostEur,
+      totalCost,
+      displayCurrency,
+      ratesState
+    );
+  }, [budgetInput, budgetCurrency, totalCostEur, totalCost, displayCurrency, ratesState]);
   const conflictsByDay = useMemo(() => dayIds.reduce<Record<DayId, string[]>>((conflicts, day) => {
     const dayItems = itinerary[day]
       .map((item) => ({ item, activity: activities.find((candidate) => candidate.id === item.activityId) }))
@@ -492,7 +547,12 @@ export default function Home() {
     return conflicts;
   }, { "Day 1": [], "Day 2": [], "Day 3": [] }), [activities, itinerary]);
   const conflictCount = Object.values(conflictsByDay).reduce((sum, ids) => sum + ids.length, 0);
-  const isPlanSaved = useMemo(() => savedPlans.some((plan) => plan.destinationId === selectedDestination && plan.budgetInput === budgetInput && JSON.stringify(plan.itinerary) === JSON.stringify(itinerary)), [budgetInput, itinerary, savedPlans, selectedDestination]);
+  const isPlanSaved = useMemo(() => savedPlans.some((plan) =>
+    plan.destinationId === selectedDestination &&
+    plan.budgetInput === budgetInput &&
+    (plan.budgetCurrency ?? (destinations.find((d) => d.id === plan.destinationId)?.currency.code ?? "EUR")) === budgetCurrency &&
+    JSON.stringify(plan.itinerary) === JSON.stringify(itinerary)
+  ), [budgetCurrency, budgetInput, itinerary, savedPlans, selectedDestination]);
 
   const filteredDestinations = useMemo(() => {
     const query = destinationQuery.trim().toLowerCase();
@@ -621,7 +681,10 @@ export default function Home() {
     const nextDestination = destinations.find((item) => item.id === id)?.name ?? "your destination";
     const nextCurrency = destinations.find((item) => item.id === id)?.currency.code as CurrencyCode | undefined;
     setSelectedDestination(id);
-    if (nextCurrency) setCurrencyCode(nextCurrency);
+    const effectiveNextCurrency = ratesState.status === "fallback" ? "EUR" : (nextCurrency ?? "EUR");
+    setCurrencyCode(effectiveNextCurrency);
+    setBudgetInput("");
+    setBudgetCurrency(effectiveNextCurrency);
     setDestinationQuery("");
     setActivityQuery("");
     setSelectedCategories([]);
@@ -642,18 +705,27 @@ export default function Home() {
       destinationId: selectedDestination,
       itinerary: JSON.parse(JSON.stringify(itinerary)) as Record<DayId, PlannedActivity[]>,
       budgetInput,
+      budgetCurrency,
       createdAt: Date.now(),
     };
-    setSavedPlans((current) => [plan, ...current.filter((item) => !(item.destinationId === selectedDestination && item.budgetInput === budgetInput && JSON.stringify(item.itinerary) === JSON.stringify(itinerary)))].slice(0, 12));
+    setSavedPlans((current) => [plan, ...current.filter((item) => !(
+      item.destinationId === selectedDestination &&
+      item.budgetInput === budgetInput &&
+      (item.budgetCurrency ?? (destinations.find((d) => d.id === item.destinationId)?.currency.code ?? "EUR")) === budgetCurrency &&
+      JSON.stringify(item.itinerary) === JSON.stringify(itinerary)
+    ))].slice(0, 12));
     flashNotice(isPlanSaved ? "Plan already saved" : "Plan saved locally");
   };
 
-  const loadSavedPlan = (plan: SavedPlan) => {
+  const loadSavedPlan = (rawPlan: SavedPlan) => {
+    const plan = normalizeSavedPlan(rawPlan);
     const savedDestination = destinations.find((item) => item.id === plan.destinationId) ?? destinations[0];
     setSelectedDestination(savedDestination.id);
-    setCurrencyCode(savedDestination.currency.code as CurrencyCode);
+    const planCurrency = plan.budgetCurrency ?? (savedDestination.currency.code as CurrencyCode);
+    setCurrencyCode(ratesState.status === "fallback" ? "EUR" : planCurrency);
     setItinerary(JSON.parse(JSON.stringify(plan.itinerary)) as Record<DayId, PlannedActivity[]>);
     setBudgetInput(plan.budgetInput);
+    setBudgetCurrency(planCurrency);
     setActiveDay("Day 1");
     setShowSavedPlans(false);
     closeMenu();
@@ -835,9 +907,19 @@ export default function Home() {
     window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" }), 170);
   };
 
+  const handleCycleCurrency = () => {
+    if (ratesState.status === "fallback") {
+      flashNotice("Exchange rates unavailable · Display locked to EUR");
+      return;
+    }
+    const next = currencyOptions[(currencyOptions.indexOf(currencyCode) + 1) % currencyOptions.length];
+    setCurrencyCode(next);
+  };
+
   const resetPlan = () => {
     setItinerary({ "Day 1": [], "Day 2": [], "Day 3": [] });
     setBudgetInput("");
+    setBudgetCurrency(displayCurrency);
     setActiveDay("Day 1");
     setSelectedActivityId(null);
     setShowMobilePlan(false);
@@ -870,6 +952,7 @@ export default function Home() {
       <div className="day-items">
         {dayActivities.map(({ item, activity }) => {
           const hasConflict = conflictsByDay[day].includes(activity.id);
+          const lineTotal = itineraryAmounts.lineTotals[`${day}-${activity.id}`] ?? getConvertedLineTotal(activity.price, item.quantity, rate);
           return (
           <div
             className={`day-item ${draggingActivityId === activity.id ? "is-dragging" : ""}`}
@@ -883,7 +966,7 @@ export default function Home() {
             <div className="day-item-copy">
               <span>{activity.category}</span>
               <strong>{activity.name}</strong>
-              <small>{getSchedule(activity).label} · {activity.duration} · {formatEurPrice(activity.price * item.quantity)}</small>
+              <small>{getSchedule(activity).label} · {activity.duration} · {formatCurrency(lineTotal, displayCurrency)}</small>
               <div className="quantity-control" aria-label={`Quantity for ${activity.name}`}>
                 <button type="button" onClick={(event) => { event.stopPropagation(); updateQuantity(activity.id, day, -1); }} disabled={item.quantity <= 1} aria-label={`Decrease ${activity.name} quantity`}>−</button>
                 <span>{item.quantity}</span>
@@ -1051,7 +1134,7 @@ export default function Home() {
                         <div className="activity-location"><MapPin size={12} /> {activity.location}</div>
                         <h3>{activity.name}</h3>
                         <p>{activity.description}</p>
-                        <div className="activity-card-footer"><span><Clock3 size={13} /> {activity.duration}</span><strong>{formatEurPrice(activity.price)}</strong><ChevronRight size={16} className="card-arrow" /></div>
+                        <div className="activity-card-footer"><span><Clock3 size={13} /> {activity.duration}</span><strong title="Indicative planning estimate">{formatEurPrice(activity.price)} <small className="price-est-label">est.</small></strong><ChevronRight size={16} className="card-arrow" /></div>
                       </div>
                     </article>
                   );
@@ -1069,15 +1152,15 @@ export default function Home() {
             <div className="rate-status-banner">
               <strong>{getRateStatusDescription(ratesState, displayCurrency)}</strong>
               {displayCurrency !== "EUR" && ratesState.rates[displayCurrency] && ratesState.status !== "fallback" && (
-                <span>1 EUR = {formatCurrency(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
+                <span>1 EUR = {formatExchangeRate(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
               )}
               <small>Planning estimates only · Supplier rates may vary</small>
             </div>
-            <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
-              <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
-              <div className="budget-input-row"><span>{CURRENCIES[displayCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${displayCurrency}`} /></div>
-              <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
-              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatAmount(totalCost)} of ${formatAmount(budget)} · ${budgetExceeded ? formatAmount(totalCost - budget) + " over" : formatAmount(budget - totalCost) + " left"}`}</small>
+            <div className={`budget-card ${budgetComparison.status}`}>
+              <div className="budget-heading"><span>Trip budget</span><strong>{budgetComparison.statusHeading}</strong></div>
+              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { setBudgetInput(event.target.value); setBudgetCurrency(displayCurrency); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
+              <div className="budget-meter"><span style={{ width: `${budgetComparison.meterPercent}%` }} /></div>
+              <small>{budgetComparison.summaryText}</small>
             </div>
             {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs" role="tablist" aria-label="Trip days">
@@ -1186,15 +1269,15 @@ export default function Home() {
             <div className="rate-status-banner">
               <strong>{getRateStatusDescription(ratesState, displayCurrency)}</strong>
               {displayCurrency !== "EUR" && ratesState.rates[displayCurrency] && ratesState.status !== "fallback" && (
-                <span>1 EUR = {formatCurrency(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
+                <span>1 EUR = {formatExchangeRate(ratesState.rates[displayCurrency], displayCurrency)} reference rate</span>
               )}
               <small>Planning estimates only · Supplier rates may vary</small>
             </div>
-            <div className={`budget-card ${budget === null ? "unset" : budgetExceeded ? "exceeded" : "within"}`}>
-              <div className="budget-heading"><span>Trip budget</span><strong>{budget === null ? "Not set" : budgetExceeded ? "Over budget" : "Within budget"}</strong></div>
-              <div className="budget-input-row"><span>{CURRENCIES[displayCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} placeholder="Set amount" aria-label={`Trip budget in ${displayCurrency}`} /></div>
-              <div className="budget-meter"><span style={{ width: `${budgetPercent}%` }} /></div>
-              <small>{budget === null ? "Add a limit to keep your trip on track." : `${formatAmount(totalCost)} of ${formatAmount(budget)} · ${budgetExceeded ? formatAmount(totalCost - budget) + " over" : formatAmount(budget - totalCost) + " left"}`}</small>
+            <div className={`budget-card ${budgetComparison.status}`}>
+              <div className="budget-heading"><span>Trip budget</span><strong>{budgetComparison.statusHeading}</strong></div>
+              <div className="budget-input-row"><span>{CURRENCIES[budgetCurrency].symbol}</span><input type="number" min="0" step="1" value={budgetInput} onChange={(event) => { setBudgetInput(event.target.value); setBudgetCurrency(displayCurrency); }} placeholder="Set amount" aria-label={`Trip budget in ${budgetCurrency}`} /></div>
+              <div className="budget-meter"><span style={{ width: `${budgetComparison.meterPercent}%` }} /></div>
+              <small>{budgetComparison.summaryText}</small>
             </div>
             {conflictCount > 0 && <div className="conflict-alert"><AlertTriangle size={15} /><div><strong>{conflictCount} scheduling conflict{conflictCount === 1 ? "" : "s"}</strong>{dayIds.filter((day) => conflictsByDay[day].length > 0).map((day) => <small key={day}>{day}: {conflictsByDay[day].map((id) => activities.find((activity) => activity.id === id)?.name).filter(Boolean).join(" + ")}</small>)}</div></div>}
             <div className="day-tabs">{dayIds.map((day, index) => <button key={day} className={`${activeDay === day ? "active" : ""} ${draggingActivityId ? "drop-target" : ""}`} onClick={() => setActiveDay(day)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDayDrop(event, day)}><span>0{index + 1}</span>{day}<i>{itinerary[day].length}</i></button>)}</div>

@@ -1112,3 +1112,35 @@ h1 em { color: #d85d43; font-style: italic; }
 .dark .detail-rate-note {
   color: #8fa090;
 }
+
+.budget-card.unavailable {
+  border-color: #d1ddd0;
+  background: rgba(240, 244, 239, 0.6);
+}
+.budget-card.unavailable .budget-heading strong {
+  color: #768779;
+}
+.budget-card.unavailable .budget-meter span {
+  background: #b0bfb1;
+}
+.dark .budget-card.unavailable {
+  border-color: #3b4c3e;
+  background: rgba(36, 48, 39, 0.6);
+}
+.dark .budget-card.unavailable .budget-heading strong {
+  color: #9cb09f;
+}
+
+.price-est-label {
+  font-size: 8.5px;
+  font-weight: 500;
+  color: #79877b;
+  margin-left: 2px;
+}
+.dark .price-est-label {
+  color: #9cb09f;
+}
+
+.currency-control.is-locked {
+  opacity: 0.85;
+}

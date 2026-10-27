@@ -8,6 +8,9 @@ import {
   getRateStatusDescription,
   CURRENCIES,
   DEFAULT_RATES_STATE,
+  compareBudget,
+  convertBudgetBetweenCurrencies,
+  isValidRateDate,
   type RatesState,
 } from "./currency";
 
@@ -191,7 +194,7 @@ describe("ROAM Currency & Pricing Logic", () => {
       "Day 3": [],
     };
 
-    it("calculates exact EUR totals and converts without premature item rounding", () => {
+    it("calculates display-consistent totals matching line items without discrepancy", () => {
       const result = calculateItineraryAmounts(
         mockItinerary,
         mockActivities,
@@ -201,14 +204,17 @@ describe("ROAM Currency & Pricing Logic", () => {
 
       // Total EUR = 84 + 28 = 112 EUR
       expect(result.totalCostEur).toBe(112);
-      // Converted total = 112 * 176.18 = 19732.16
-      expect(result.totalCost).toBeCloseTo(19732.16, 2);
-      expect(formatCurrency(result.totalCost, "JPY")).toBe("¥19,732");
+      // Day 1: unitPrice Math.round(42 * 176.18) = 7400 JPY * 2 = 14,800 JPY
+      expect(result.daySubtotals["Day 1"]).toBe(14800);
+      expect(formatCurrency(result.daySubtotals["Day 1"], "JPY")).toBe("¥14,800");
 
-      // Day 1: 84 * 176.18 = 14799.12 -> ¥14,799
-      expect(formatCurrency(result.daySubtotals["Day 1"], "JPY")).toBe("¥14,799");
-      // Day 2: 28 * 176.18 = 4933.04 -> ¥4,933
+      // Day 2: unitPrice Math.round(28 * 176.18) = 4933 JPY * 1 = 4,933 JPY
+      expect(result.daySubtotals["Day 2"]).toBe(4933);
       expect(formatCurrency(result.daySubtotals["Day 2"], "JPY")).toBe("¥4,933");
+
+      // Sum of day subtotals equals totalCost: 14800 + 4933 = 19733 JPY
+      expect(result.totalCost).toBe(19733);
+      expect(formatCurrency(result.totalCost, "JPY")).toBe("¥19,733");
     });
 
     it("consistently computes budget comparison in the same currency", () => {
@@ -224,6 +230,43 @@ describe("ROAM Currency & Pricing Logic", () => {
       const budgetExceeded = result.totalCost > budget;
       expect(budgetExceeded).toBe(true);
       expect(result.totalCost - budget).toBe(12);
+    });
+  });
+
+  describe("Requirement 7: Date validation and cross-currency budget comparison", () => {
+    it("validates standard calendar dates strictly", () => {
+      expect(isValidRateDate("2026-10-26")).toBe(true);
+      expect(isValidRateDate("2024-02-29")).toBe(true); // leap year
+      expect(isValidRateDate("2023-02-29")).toBe(false); // non-leap year
+      expect(isValidRateDate("not-a-date")).toBe(false);
+      expect(isValidRateDate("")).toBe(false);
+      expect(isValidRateDate(null)).toBe(false);
+    });
+
+    it("compares budget across currencies accurately", () => {
+      // 100 EUR budget vs 112 EUR total -> exceeded by 12 EUR
+      const resEur = compareBudget("100", "EUR", 112, 112, "EUR", mockLiveRatesState);
+      expect(resEur.status).toBe("exceeded");
+      expect(resEur.statusHeading).toBe("Over budget");
+      expect(resEur.summaryText).toContain("12");
+
+      // 25,000 JPY budget vs 112 EUR trip (19,733 JPY) -> within budget
+      const resJpy = compareBudget("25000", "JPY", 112, 19733, "JPY", mockLiveRatesState);
+      expect(resJpy.status).toBe("within");
+      expect(resJpy.statusHeading).toBe("Within budget");
+
+      // Budget input empty -> status unset
+      const resEmpty = compareBudget("", "EUR", 112, 112, "EUR", mockLiveRatesState);
+      expect(resEmpty.status).toBe("unset");
+    });
+
+    it("converts budget between currencies without precision loss", () => {
+      // 100 EUR to JPY at 176.18 -> 17618 JPY
+      const jpy = convertBudgetBetweenCurrencies(100, "EUR", "JPY", mockLiveRatesState);
+      expect(jpy).toBe(17618);
+
+      // Same currency returns original amount
+      expect(convertBudgetBetweenCurrencies(500, "EUR", "EUR", mockLiveRatesState)).toBe(500);
     });
   });
 });

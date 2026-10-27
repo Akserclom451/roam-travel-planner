@@ -20,7 +20,7 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyInfo> = {
 
 export const CURRENCY_OPTIONS: CurrencyCode[] = ["JPY", "EUR", "ISK"];
 
-export type RateStatus = "loading" | "live" | "stale" | "fallback";
+export type RateStatus = "loading" | "cached" | "live" | "stale" | "fallback";
 
 export interface RatesState {
   rates: Record<CurrencyCode, number>;
@@ -42,6 +42,31 @@ export const DEFAULT_RATES_STATE: RatesState = {
 };
 
 const CACHE_STORAGE_KEY = "roam-exchange-rates-v2";
+
+/**
+ * Validates that a string is a strictly valid YYYY-MM-DD calendar date.
+ */
+export function isValidRateDate(dateStr: unknown): boolean {
+  if (typeof dateStr !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [yearStr, monthStr, dayStr] = dateStr.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (year < 2020 || year > 2050 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const dateObj = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(dateObj.getTime())) return false;
+  if (
+    dateObj.getUTCFullYear() !== year ||
+    dateObj.getUTCMonth() + 1 !== month ||
+    dateObj.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Validates and normalizes Frankfurter v2 response data:
@@ -80,7 +105,7 @@ export function parseFrankfurterResponse(data: unknown): {
       }
     }
 
-    if (rates.JPY > 0 && rates.ISK > 0 && dateStr) {
+    if (rates.JPY > 0 && rates.ISK > 0 && dateStr && isValidRateDate(dateStr)) {
       return { rates, date: dateStr };
     }
   }
@@ -89,6 +114,7 @@ export function parseFrankfurterResponse(data: unknown): {
   const obj = data as Record<string, any>;
   if (
     typeof obj.date === "string" &&
+    isValidRateDate(obj.date) &&
     obj.rates &&
     typeof obj.rates === "object"
   ) {
@@ -122,7 +148,7 @@ export function loadCachedRates(): RatesState | null {
       parsed.rates.JPY > 0 &&
       typeof parsed.rates.ISK === "number" &&
       parsed.rates.ISK > 0 &&
-      typeof parsed.date === "string"
+      isValidRateDate(parsed.date)
     ) {
       return {
         rates: {
@@ -131,7 +157,7 @@ export function loadCachedRates(): RatesState | null {
           ISK: parsed.rates.ISK,
         },
         date: parsed.date,
-        status: "stale",
+        status: "cached",
         lastUpdated: parsed.lastUpdated || Date.now(),
       };
     }
@@ -163,7 +189,7 @@ export function saveCachedRates(rates: Record<CurrencyCode, number>, date: strin
 /**
  * Fetches reference exchange rates from Frankfurter API v2 with automatic fallback to v1.
  */
-export async function fetchExchangeRates(): Promise<{
+export async function fetchExchangeRates(timeoutMs = 8000): Promise<{
   rates: Record<CurrencyCode, number>;
   date: string;
 }> {
@@ -172,32 +198,45 @@ export async function fetchExchangeRates(): Promise<{
 
   // Try official v2 endpoint
   try {
-    const res = await fetch(v2Url, {
-      headers: { Accept: "application/json" },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const parsed = parseFrankfurterResponse(data);
-      if (parsed) return parsed;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(v2Url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const parsed = parseFrankfurterResponse(data);
+        if (parsed) return parsed;
+      }
+    } finally {
+      clearTimeout(timer);
     }
   } catch {
     // Proceed to fallback endpoint
   }
 
   // Fallback to v1 endpoint
-  const resFallback = await fetch(v1Url, {
-    headers: { Accept: "application/json" },
-  });
-  if (!resFallback.ok) {
-    throw new Error(`Frankfurter rate request failed with HTTP ${resFallback.status}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resFallback = await fetch(v1Url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!resFallback.ok) {
+      throw new Error(`Frankfurter rate request failed with HTTP ${resFallback.status}`);
+    }
+    const dataFallback = await resFallback.json();
+    const parsedFallback = parseFrankfurterResponse(dataFallback);
+    if (!parsedFallback) {
+      throw new Error("Invalid exchange rate payload received from rate provider");
+    }
+    return parsedFallback;
+  } finally {
+    clearTimeout(timer);
   }
-  const dataFallback = await resFallback.json();
-  const parsedFallback = parseFrankfurterResponse(dataFallback);
-  if (!parsedFallback) {
-    throw new Error("Invalid exchange rate payload received from rate provider");
-  }
-
-  return parsedFallback;
 }
 
 /**
@@ -224,6 +263,7 @@ export function getConversionRate(
     Number.isFinite(rate) &&
     rate > 0 &&
     ratesState.date !== null &&
+    isValidRateDate(ratesState.date) &&
     ratesState.status !== "fallback";
 
   if (hasValidRate) {
@@ -263,6 +303,33 @@ export function formatCurrency(amount: number, currencyCode: CurrencyCode): stri
 }
 
 /**
+ * Formats a reference exchange rate with two decimal places.
+ * Example: 176.18 -> "¥176.18", 136.54 -> "kr 136.54".
+ */
+export function formatExchangeRate(rate: number, currencyCode: CurrencyCode): string {
+  const sym = CURRENCIES[currencyCode]?.symbol || currencyCode;
+  const formatted = rate.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return currencyCode === "ISK" ? `${sym} ${formatted}` : `${sym}${formatted}`;
+}
+
+/**
+ * Calculates display-rounded unit price for a given activity.
+ */
+export function getConvertedUnitPrice(priceEur: number, rate: number): number {
+  return Math.round(priceEur * rate);
+}
+
+/**
+ * Calculates display line item total matching unitPrice * quantity arithmetic.
+ */
+export function getConvertedLineTotal(priceEur: number, quantity: number, rate: number): number {
+  return getConvertedUnitPrice(priceEur, rate) * quantity;
+}
+
+/**
  * Converts a base EUR price into the target currency and formats it.
  */
 export function formatEurPrice(
@@ -276,7 +343,7 @@ export function formatEurPrice(
   isConverted: boolean;
 } {
   const { rate, effectiveCurrency, isConverted } = getConversionRate(targetCurrency, ratesState);
-  const convertedAmount = amountEur * rate;
+  const convertedAmount = getConvertedUnitPrice(amountEur, rate);
   return {
     formatted: formatCurrency(convertedAmount, effectiveCurrency),
     amount: convertedAmount,
@@ -286,7 +353,13 @@ export function formatEurPrice(
 }
 
 /**
- * Calculates day subtotals in base EUR and converts without premature item rounding.
+ * Calculates day subtotals, item totals, and overall total following the display-consistent
+ * integer arithmetic policy:
+ * displayed_unit_price = Math.round(priceEur * rate)
+ * displayed_line_total = displayed_unit_price * quantity
+ * daySubtotal = sum(displayed_line_total)
+ * totalCost = sum(daySubtotal)
+ * This guarantees zero discrepancy between line items and totals in all views.
  */
 export function calculateItineraryAmounts(
   itinerary: Record<string, { activityId: string; quantity: number }[]>,
@@ -299,24 +372,35 @@ export function calculateItineraryAmounts(
   totalCostEur: number;
   effectiveCurrency: CurrencyCode;
   isConverted: boolean;
+  unitPrices: Record<string, number>;
+  lineTotals: Record<string, number>;
 } {
   const { rate, effectiveCurrency, isConverted } = getConversionRate(targetCurrency, ratesState);
   const daySubtotals: Record<string, number> = {};
+  const unitPrices: Record<string, number> = {};
+  const lineTotals: Record<string, number> = {};
+  let totalCost = 0;
   let totalCostEur = 0;
 
+  for (const activity of activities) {
+    unitPrices[activity.id] = getConvertedUnitPrice(activity.price, rate);
+  }
+
   for (const [day, items] of Object.entries(itinerary)) {
-    let dayTotalEur = 0;
+    let dayTotal = 0;
     for (const item of items) {
       const activity = activities.find((a) => a.id === item.activityId);
       if (activity) {
-        dayTotalEur += activity.price * item.quantity;
+        const unitPrice = unitPrices[activity.id] ?? getConvertedUnitPrice(activity.price, rate);
+        const lineTotal = unitPrice * item.quantity;
+        lineTotals[`${day}-${activity.id}`] = lineTotal;
+        dayTotal += lineTotal;
+        totalCostEur += activity.price * item.quantity;
       }
     }
-    daySubtotals[day] = dayTotalEur * rate;
-    totalCostEur += dayTotalEur;
+    daySubtotals[day] = dayTotal;
+    totalCost += dayTotal;
   }
-
-  const totalCost = totalCostEur * rate;
 
   return {
     daySubtotals,
@@ -324,6 +408,8 @@ export function calculateItineraryAmounts(
     totalCostEur,
     effectiveCurrency,
     isConverted,
+    unitPrices,
+    lineTotals,
   };
 }
 
@@ -340,6 +426,10 @@ export function getRateStatusDescription(ratesState: RatesState, selectedCurrenc
       return ratesState.date
         ? `ECB reference rate: ${ratesState.date} · Planning estimates`
         : "Live ECB reference rate · Planning estimates";
+    case "cached":
+      return ratesState.date
+        ? `ECB reference rate: ${ratesState.date} (cached) · Planning estimates`
+        : "Cached reference rate · Planning estimates";
     case "stale":
       return ratesState.date
         ? `Stale reference rate from ${ratesState.date} (cached, refresh failed) · Planning estimates`
@@ -352,4 +442,178 @@ export function getRateStatusDescription(ratesState: RatesState, selectedCurrenc
     default:
       return "Live conversion unavailable · Displaying base EUR estimates";
   }
+}
+
+export interface BudgetComparisonResult {
+  budgetInput: string;
+  budgetNumber: number | null;
+  budgetCurrency: CurrencyCode;
+  budgetEur: number | null;
+  budgetInDisplayCurrency: number | null;
+  totalCostInDisplayCurrency: number;
+  totalCostEur: number;
+  isComparisonAvailable: boolean;
+  status: "unset" | "within" | "exceeded" | "unavailable";
+  statusHeading: string;
+  meterPercent: number;
+  summaryText: string;
+}
+
+/**
+ * Compares user budget with itinerary total in underlying base EUR.
+ * If rates are unavailable or invalid, marks comparison as unavailable.
+ */
+export function compareBudget(
+  rawInput: string,
+  budgetCurrency: CurrencyCode,
+  totalCostEur: number,
+  totalCostInDisplayCurrency: number,
+  displayCurrency: CurrencyCode,
+  ratesState: RatesState
+): BudgetComparisonResult {
+  const trimmed = rawInput.trim();
+
+  if (!trimmed) {
+    return {
+      budgetInput: rawInput,
+      budgetNumber: null,
+      budgetCurrency,
+      budgetEur: null,
+      budgetInDisplayCurrency: null,
+      totalCostInDisplayCurrency,
+      totalCostEur,
+      isComparisonAvailable: true,
+      status: "unset",
+      statusHeading: "Not set",
+      meterPercent: totalCostEur > 0 ? 100 : 0,
+      summaryText: "Add a limit to keep your trip on track.",
+    };
+  }
+
+  const budgetNumber = Math.max(0, Number(trimmed) || 0);
+
+  // Convert budget to base EUR
+  let budgetEur: number | null = null;
+  if (budgetCurrency === "EUR") {
+    budgetEur = budgetNumber;
+  } else {
+    const bRate = ratesState.rates[budgetCurrency];
+    const isRateValid =
+      typeof bRate === "number" &&
+      Number.isFinite(bRate) &&
+      bRate > 0 &&
+      ratesState.date !== null &&
+      isValidRateDate(ratesState.date) &&
+      ratesState.status !== "fallback";
+    if (isRateValid) {
+      budgetEur = budgetNumber / bRate;
+    }
+  }
+
+  // If rate is missing or invalid, comparison is unavailable
+  if (budgetEur === null) {
+    return {
+      budgetInput: rawInput,
+      budgetNumber,
+      budgetCurrency,
+      budgetEur: null,
+      budgetInDisplayCurrency: null,
+      totalCostInDisplayCurrency,
+      totalCostEur,
+      isComparisonAvailable: false,
+      status: "unavailable",
+      statusHeading: "Comparison unavailable",
+      meterPercent: 0,
+      summaryText: `Exchange rate unavailable to compare ${formatCurrency(budgetNumber, budgetCurrency)} with trip total.`,
+    };
+  }
+
+  // Compare in base EUR
+  const exceeded = totalCostEur > budgetEur;
+  const meterPercent =
+    budgetEur === 0
+      ? totalCostEur > 0
+        ? 100
+        : 0
+      : Math.min(100, (totalCostEur / budgetEur) * 100);
+
+  const { rate: displayRate } = getConversionRate(displayCurrency, ratesState);
+  const budgetInDisplayCurrency = Math.round(budgetEur * displayRate);
+  const diffInDisplayCurrency = Math.abs(totalCostInDisplayCurrency - budgetInDisplayCurrency);
+
+  let summaryText = "";
+  if (budgetCurrency === displayCurrency) {
+    summaryText = `${formatCurrency(totalCostInDisplayCurrency, displayCurrency)} of ${formatCurrency(budgetInDisplayCurrency, displayCurrency)} · ${
+      exceeded
+        ? `${formatCurrency(diffInDisplayCurrency, displayCurrency)} over`
+        : `${formatCurrency(diffInDisplayCurrency, displayCurrency)} left`
+    }`;
+  } else {
+    summaryText = `${formatCurrency(totalCostInDisplayCurrency, displayCurrency)} of ${formatCurrency(budgetInDisplayCurrency, displayCurrency)} (orig. ${formatCurrency(budgetNumber, budgetCurrency)}) · ${
+      exceeded
+        ? `${formatCurrency(diffInDisplayCurrency, displayCurrency)} over`
+        : `${formatCurrency(diffInDisplayCurrency, displayCurrency)} left`
+    }`;
+  }
+
+  return {
+    budgetInput: rawInput,
+    budgetNumber,
+    budgetCurrency,
+    budgetEur,
+    budgetInDisplayCurrency,
+    totalCostInDisplayCurrency,
+    totalCostEur,
+    isComparisonAvailable: true,
+    status: exceeded ? "exceeded" : "within",
+    statusHeading: exceeded ? "Over budget" : "Within budget",
+    meterPercent,
+    summaryText,
+  };
+}
+
+/**
+ * Converts a budget amount between currencies without precision loss.
+ */
+export function convertBudgetBetweenCurrencies(
+  amount: number,
+  fromCurrency: CurrencyCode,
+  toCurrency: CurrencyCode,
+  ratesState: RatesState
+): number | null {
+  if (fromCurrency === toCurrency) return amount;
+
+  let amountEur: number | null = null;
+  if (fromCurrency === "EUR") {
+    amountEur = amount;
+  } else {
+    const rateFrom = ratesState.rates[fromCurrency];
+    if (
+      typeof rateFrom === "number" &&
+      rateFrom > 0 &&
+      ratesState.date &&
+      isValidRateDate(ratesState.date) &&
+      ratesState.status !== "fallback"
+    ) {
+      amountEur = amount / rateFrom;
+    }
+  }
+
+  if (amountEur === null) return null;
+
+  if (toCurrency === "EUR") {
+    return Math.round(amountEur);
+  }
+  const rateTo = ratesState.rates[toCurrency];
+  if (
+    typeof rateTo === "number" &&
+    rateTo > 0 &&
+    ratesState.date &&
+    isValidRateDate(ratesState.date) &&
+    ratesState.status !== "fallback"
+  ) {
+    return Math.round(amountEur * rateTo);
+  }
+
+  return null;
 }
