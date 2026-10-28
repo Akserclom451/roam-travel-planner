@@ -54,6 +54,12 @@ describe("ROAM Currency & Pricing Logic", () => {
       expect(formatted.replace(/\u00a0/g, " ")).toBe("kr 5,735");
     });
 
+    it("formats standardized currency strings: JPY as ¥7,398, EUR as €42, and ISK as kr 11,742", () => {
+      expect(formatCurrency(11742, "ISK")).toBe("kr 11,742");
+      expect(formatCurrency(7398, "JPY")).toBe("¥7,398");
+      expect(formatCurrency(42, "EUR")).toBe("€42");
+    });
+
     it("converts base EUR amounts accurately into selected currencies", () => {
       // 42 EUR tea ceremony
       const eurResult = formatEurPrice(42, "EUR", mockLiveRatesState);
@@ -176,6 +182,16 @@ describe("ROAM Currency & Pricing Logic", () => {
       const liveDesc = getRateStatusDescription(mockLiveRatesState, "JPY");
       expect(liveDesc).toContain("2026-10-26");
       expect(liveDesc).toContain("ECB reference rate");
+    });
+
+    it("handles fallback and live states for EUR correctly", () => {
+      const fallbackEurDesc = getRateStatusDescription(mockFallbackRatesState, "EUR");
+      expect(fallbackEurDesc).toContain("unavailable");
+      expect(fallbackEurDesc).not.toContain("Base reference currency");
+      expect(fallbackEurDesc).toBe("Live conversion unavailable · Showing EUR estimates");
+
+      const liveEurDesc = getRateStatusDescription(mockLiveRatesState, "EUR");
+      expect(liveEurDesc).toBe("Base reference currency (EUR)");
     });
   });
 

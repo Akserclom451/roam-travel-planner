@@ -275,31 +275,29 @@ export function getConversionRate(
   return { rate: 1, effectiveCurrency: "EUR", isConverted: false };
 }
 
+const numberFormatter = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 0,
+});
+
 /**
- * Formats a monetary amount into a clean, localized string using Intl.NumberFormat.
- * Uses narrowSymbol for standard display: "€42", "¥7,400", "kr 5,735".
+ * Formats a monetary amount into a clean, localized string.
+ * Uses Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+ * and prepends the symbol from CURRENCIES ("¥7,398", "€42", "kr 11,742").
  */
 export function formatCurrency(amount: number, currencyCode: CurrencyCode): string {
-  if (!Number.isFinite(amount)) return `${CURRENCIES[currencyCode].symbol}0`;
-  
-  // Consistent rounding for integer display (JPY and ISK are zero-decimal, EUR display rounded)
-  const rounded = Math.round(amount);
-
-  try {
-    const formatter = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currencyCode,
-      currencyDisplay: "narrowSymbol",
-      maximumFractionDigits: 0,
-      minimumFractionDigits: 0,
-    });
-    return formatter.format(rounded);
-  } catch {
-    // Fallback if Intl.NumberFormat encounters issues with narrowSymbol in older runtimes
-    const sym = CURRENCIES[currencyCode]?.symbol || currencyCode;
-    const formattedNum = rounded.toLocaleString("en-US");
-    return currencyCode === "ISK" ? `${sym} ${formattedNum}` : `${sym}${formattedNum}`;
+  const symbol = CURRENCIES[currencyCode]?.symbol ?? currencyCode;
+  if (!Number.isFinite(amount)) {
+    return currencyCode === "ISK" ? `${symbol} 0` : `${symbol}0`;
   }
+
+  const rounded = Math.round(amount);
+  const isNegative = rounded < 0;
+  const formattedAbs = numberFormatter.format(Math.abs(rounded));
+  const prefix = isNegative ? "-" : "";
+
+  return currencyCode === "ISK"
+    ? `${prefix}${symbol} ${formattedAbs}`
+    : `${prefix}${symbol}${formattedAbs}`;
 }
 
 /**
@@ -417,6 +415,10 @@ export function calculateItineraryAmounts(
  * Generates honest status labels for reference rates.
  */
 export function getRateStatusDescription(ratesState: RatesState, selectedCurrency: CurrencyCode): string {
+  if (ratesState.status === "fallback") {
+    return "Live conversion unavailable · Showing EUR estimates";
+  }
+
   if (selectedCurrency === "EUR" && ratesState.status !== "loading") {
     return "Base reference currency (EUR)";
   }
@@ -438,9 +440,8 @@ export function getRateStatusDescription(ratesState: RatesState, selectedCurrenc
       return ratesState.date
         ? `Fetching reference exchange rates (using cached rate from ${ratesState.date})...`
         : "Fetching reference exchange rates · Displaying base EUR estimates";
-    case "fallback":
     default:
-      return "Live conversion unavailable · Displaying base EUR estimates";
+      return "Live conversion unavailable · Showing EUR estimates";
   }
 }
 

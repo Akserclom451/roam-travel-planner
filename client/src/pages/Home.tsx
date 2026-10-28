@@ -1188,7 +1188,9 @@ export default function Home() {
               <button className={`menu-setting currency-control ${ratesState.status === "fallback" ? "is-locked" : ""}`} onClick={handleCycleCurrency}><span>05</span><strong>Currency</strong><b>{displayCurrency} ({CURRENCIES[displayCurrency].symbol})</b></button>
               <div className="menu-rate-info">
                 <small>
-                  {displayCurrency === "EUR"
+                  {ratesState.status === "fallback"
+                    ? "Live conversion unavailable · Showing EUR estimates"
+                    : displayCurrency === "EUR"
                     ? "Base currency (EUR) · Planning estimates"
                     : `1 EUR = ${formatExchangeRate(rate, displayCurrency)} · ${getRateStatusDescription(ratesState, displayCurrency)}`}
                 </small>
