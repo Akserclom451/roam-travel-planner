@@ -13,14 +13,18 @@ import {
   Filter,
   GripVertical,
   Heart,
+  Mail,
   MapPin,
   Menu,
   Navigation,
+  Phone,
   Plus,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  User,
   Wallet,
   X,
 } from "lucide-react";
@@ -43,6 +47,15 @@ import {
   loadCachedRates,
   saveCachedRates,
 } from "@/lib/currency";
+import {
+  type CountryCallingCode,
+  type LeadTravellerErrors,
+  type LeadTravellerForm,
+  COUNTRY_CALLING_CODES,
+  calculatePartySize,
+  getDefaultCallingCode,
+  validateLeadTravellerForm,
+} from "@/lib/traveller";
 
 type DestinationId = "kyoto" | "lisbon" | "reykjavik";
 type DayId = "Day 1" | "Day 2" | "Day 3";
@@ -75,7 +88,7 @@ function normalizeSavedPlan(plan: SavedPlan): SavedPlan {
   };
 }
 
-type CheckoutStep = "review" | "traveller-placeholder";
+type CheckoutStep = "review" | "traveller" | "payment-placeholder";
 
 type Activity = {
   id: string;
@@ -485,6 +498,71 @@ export default function Home() {
   const daySubtotals = itineraryAmounts.daySubtotals as Record<DayId, number>;
   const totalCost = itineraryAmounts.totalCost;
   const totalCostEur = itineraryAmounts.totalCostEur;
+
+  // Derive guest count / party size directly from the itinerary activity participant quantities
+  const partySize = useMemo(
+    () => calculatePartySize(checkoutItems.map((ci) => ci.item.quantity)),
+    [checkoutItems]
+  );
+
+  const [travellerForm, setTravellerForm] = useState<LeadTravellerForm>(() => ({
+    fullName: "",
+    email: "",
+    countryCode: getDefaultCallingCode(selectedDestination),
+    phone: "",
+  }));
+  const [travellerErrors, setTravellerErrors] = useState<LeadTravellerErrors>({});
+  const [travellerTouched, setTravellerTouched] = useState<Record<keyof LeadTravellerForm, boolean>>({
+    fullName: false,
+    email: false,
+    countryCode: false,
+    phone: false,
+  });
+
+  // Keep country calling code aligned with destination until user enters phone or customizes code
+  useEffect(() => {
+    if (!travellerTouched.countryCode && travellerForm.phone === "") {
+      setTravellerForm((prev) => ({
+        ...prev,
+        countryCode: getDefaultCallingCode(selectedDestination),
+      }));
+    }
+  }, [selectedDestination, travellerTouched.countryCode, travellerForm.phone]);
+
+  const handleTravellerChange = (field: keyof LeadTravellerForm, value: string) => {
+    const updated = { ...travellerForm, [field]: value };
+    setTravellerForm(updated);
+    if (travellerTouched[field]) {
+      const errs = validateLeadTravellerForm(updated);
+      setTravellerErrors(errs);
+    }
+  };
+
+  const handleTravellerBlur = (field: keyof LeadTravellerForm) => {
+    setTravellerTouched((prev) => ({ ...prev, [field]: true }));
+    const errs = validateLeadTravellerForm(travellerForm);
+    setTravellerErrors(errs);
+  };
+
+  const handleProceedToPayment = () => {
+    setTravellerTouched({
+      fullName: true,
+      email: true,
+      countryCode: true,
+      phone: true,
+    });
+    const errs = validateLeadTravellerForm(travellerForm);
+    setTravellerErrors(errs);
+    if (Object.keys(errs).length === 0) {
+      setCheckoutStep("payment-placeholder");
+    } else {
+      const firstInvalidField = Object.keys(errs)[0];
+      const el = document.getElementById(`traveller-${firstInvalidField}`);
+      if (el) {
+        el.focus();
+      }
+    }
+  };
 
   // Keep only: when budgetInput is empty, keep budgetCurrency synced to displayCurrency.
   useEffect(() => {
@@ -1276,12 +1354,18 @@ export default function Home() {
               <div>
                 <span className="section-kicker">ROAM checkout · {destination.name}</span>
                 <h2 id="checkout-dialog-title">
-                  {checkoutStep === "review" ? "Review your trip" : "Traveller details"}
+                  {checkoutStep === "review"
+                    ? "Review your trip"
+                    : checkoutStep === "traveller"
+                    ? "Traveller details"
+                    : "Booking and payment"}
                 </h2>
                 <p>
                   {checkoutStep === "review"
                     ? "Make sure everything is right before continuing."
-                    : "Step 2 is currently in development."}
+                    : checkoutStep === "traveller"
+                    ? "Enter contact details for the lead traveller managing this booking."
+                    : `Online booking is not yet available for ${destination.name}.`}
                 </p>
               </div>
               <button type="button" className="icon-button" onClick={returnToItinerary} aria-label="Return to itinerary"><X size={18} /></button>
@@ -1292,17 +1376,26 @@ export default function Home() {
                 className={`${checkoutStep === "review" ? "active" : "complete"}`}
                 aria-current={checkoutStep === "review" ? "step" : undefined}
               >
-                <i>1</i>
+                <i>{checkoutStep !== "review" ? <Check size={12} strokeWidth={2.8} /> : "1"}</i>
                 <span>Review your trip</span>
               </span>
               <span
-                className={`${checkoutStep === "traveller-placeholder" ? "active" : "upcoming"}`}
-                aria-current={checkoutStep === "traveller-placeholder" ? "step" : undefined}
+                className={`${
+                  checkoutStep === "traveller"
+                    ? "active"
+                    : checkoutStep === "payment-placeholder"
+                    ? "complete"
+                    : "upcoming"
+                }`}
+                aria-current={checkoutStep === "traveller" ? "step" : undefined}
               >
-                <i>2</i>
+                <i>{checkoutStep === "payment-placeholder" ? <Check size={12} strokeWidth={2.8} /> : "2"}</i>
                 <span>Traveller details</span>
               </span>
-              <span className="upcoming">
+              <span
+                className={`${checkoutStep === "payment-placeholder" ? "active" : "upcoming"}`}
+                aria-current={checkoutStep === "payment-placeholder" ? "step" : undefined}
+              >
                 <i>3</i>
                 <span>Booking and payment</span>
               </span>
@@ -1442,7 +1535,7 @@ export default function Home() {
                       <button
                         type="button"
                         className="checkout-primary"
-                        onClick={() => setCheckoutStep("traveller-placeholder")}
+                        onClick={() => setCheckoutStep("traveller")}
                       >
                         Continue to traveller details <ArrowRight size={15} />
                       </button>
@@ -1452,16 +1545,199 @@ export default function Home() {
               </div>
             )}
 
-            {checkoutStep === "traveller-placeholder" && (
+            {checkoutStep === "traveller" && (
+              <div className="checkout-body">
+                <div className="traveller-summary-card">
+                  <div className="traveller-summary-header">
+                    <div className="traveller-summary-badge">
+                      <User size={14} />
+                      <span>Lead Traveller</span>
+                    </div>
+                    <div className="traveller-guest-count">
+                      <strong>{partySize} {partySize === 1 ? "traveller" : "travellers"}</strong>
+                      <span>in booking party</span>
+                    </div>
+                  </div>
+                  <p className="traveller-summary-note">
+                    Derived from your {checkoutItems.length} planned {checkoutItems.length === 1 ? "activity" : "activities"} in {destination.name}. As lead traveller, this person will receive tickets, booking confirmations, and host communications for all party members.
+                  </p>
+                </div>
+
+                <form
+                  className="traveller-form"
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleProceedToPayment();
+                  }}
+                >
+                  <div className="traveller-form-section">
+                    <h3 className="traveller-form-title">Lead traveller contact details</h3>
+                    <p className="traveller-form-subtitle">
+                      Enter contact information for the primary adult traveller in your group.
+                    </p>
+
+                    <div className={`form-group ${travellerTouched.fullName && travellerErrors.fullName ? "has-error" : ""}`}>
+                      <label htmlFor="traveller-fullName">
+                        Full name <span className="req-star" aria-hidden="true">*</span>
+                      </label>
+                      <div className="input-with-icon">
+                        <User size={15} className="input-icon" aria-hidden="true" />
+                        <input
+                          id="traveller-fullName"
+                          name="fullName"
+                          type="text"
+                          autoComplete="name"
+                          placeholder="e.g. Eleanor Vance"
+                          value={travellerForm.fullName}
+                          onChange={(e) => handleTravellerChange("fullName", e.target.value)}
+                          onBlur={() => handleTravellerBlur("fullName")}
+                          required
+                          aria-invalid={Boolean(travellerTouched.fullName && travellerErrors.fullName)}
+                          aria-describedby={
+                            travellerTouched.fullName && travellerErrors.fullName
+                              ? "traveller-fullName-error"
+                              : "traveller-fullName-hint"
+                          }
+                        />
+                      </div>
+                      <span id="traveller-fullName-hint" className="form-hint">
+                        Enter your full name as you would like it shown on your booking.
+                      </span>
+                      {travellerTouched.fullName && travellerErrors.fullName && (
+                        <span id="traveller-fullName-error" className="form-error" role="alert">
+                          <AlertTriangle size={12} /> {travellerErrors.fullName}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className={`form-group ${travellerTouched.email && travellerErrors.email ? "has-error" : ""}`}>
+                      <label htmlFor="traveller-email">
+                        Email address <span className="req-star" aria-hidden="true">*</span>
+                      </label>
+                      <div className="input-with-icon">
+                        <Mail size={15} className="input-icon" aria-hidden="true" />
+                        <input
+                          id="traveller-email"
+                          name="email"
+                          type="email"
+                          autoComplete="email"
+                          placeholder="e.g. eleanor@example.com"
+                          value={travellerForm.email}
+                          onChange={(e) => handleTravellerChange("email", e.target.value)}
+                          onBlur={() => handleTravellerBlur("email")}
+                          required
+                          aria-invalid={Boolean(travellerTouched.email && travellerErrors.email)}
+                          aria-describedby={
+                            travellerTouched.email && travellerErrors.email
+                              ? "traveller-email-error"
+                              : "traveller-email-hint"
+                          }
+                        />
+                      </div>
+                      <span id="traveller-email-hint" className="form-hint">
+                        Vouchers, itinerary confirmation, and notifications will be sent here
+                      </span>
+                      {travellerTouched.email && travellerErrors.email && (
+                        <span id="traveller-email-error" className="form-error" role="alert">
+                          <AlertTriangle size={12} /> {travellerErrors.email}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className={`form-group ${travellerTouched.phone && travellerErrors.phone ? "has-error" : ""}`}>
+                      <label htmlFor="traveller-phone">
+                        Phone number <span className="req-star" aria-hidden="true">*</span>
+                      </label>
+                      <div className="phone-input-combo">
+                        <div className="country-code-select-wrap">
+                          <label htmlFor="traveller-countryCode" className="sr-only">Country calling code</label>
+                          <select
+                            id="traveller-countryCode"
+                            name="countryCode"
+                            value={travellerForm.countryCode}
+                            onChange={(e) => handleTravellerChange("countryCode", e.target.value)}
+                            onBlur={() => handleTravellerBlur("countryCode")}
+                            aria-invalid={Boolean(travellerTouched.countryCode && travellerErrors.countryCode)}
+                          >
+                            {COUNTRY_CALLING_CODES.map((item) => (
+                              <option key={`${item.code}-${item.country}`} value={item.code}>
+                                {item.flag} {item.code} ({item.country})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="input-with-icon phone-number-input">
+                          <Phone size={15} className="input-icon" aria-hidden="true" />
+                          <input
+                            id="traveller-phone"
+                            name="phone"
+                            type="tel"
+                            autoComplete="tel-national"
+                            placeholder="e.g. 555-0199"
+                            value={travellerForm.phone}
+                            onChange={(e) => handleTravellerChange("phone", e.target.value)}
+                            onBlur={() => handleTravellerBlur("phone")}
+                            required
+                            aria-invalid={Boolean(travellerTouched.phone && travellerErrors.phone)}
+                            aria-describedby={
+                              travellerTouched.phone && travellerErrors.phone
+                                ? "traveller-phone-error"
+                                : "traveller-phone-hint"
+                            }
+                          />
+                        </div>
+                      </div>
+                      <span id="traveller-phone-hint" className="form-hint">
+                        Used for urgent pickup coordination or timing updates by local hosts
+                      </span>
+                      {travellerTouched.phone && travellerErrors.phone && (
+                        <span id="traveller-phone-error" className="form-error" role="alert">
+                          <AlertTriangle size={12} /> {travellerErrors.phone}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="traveller-privacy-note">
+                    <Mail size={16} className="privacy-icon" />
+                    <div>
+                      <strong>Contact & coordination</strong>
+                      <p>
+                        Your name, email address, and phone number are used to address your booking summary and coordinate activity timings with hosts.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="checkout-actions">
+                    <button
+                      type="button"
+                      className="checkout-secondary"
+                      onClick={() => setCheckoutStep("review")}
+                    >
+                      <ArrowLeft size={15} /> Back to trip review
+                    </button>
+                    <button
+                      type="submit"
+                      className="checkout-primary"
+                    >
+                      Continue to booking and payment <ArrowRight size={15} />
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {checkoutStep === "payment-placeholder" && (
               <div className="checkout-body placeholder-body">
                 <div className="placeholder-status-card" role="status" aria-live="polite">
                   <div className="placeholder-status-icon" aria-hidden="true">
                     <Compass size={22} />
                   </div>
                   <div>
-                    <h3>Step 2: Traveller details in development</h3>
+                    <h3>Booking integration in progress</h3>
                     <p>
-                      You have completed Step 1 (Review your trip). Step 2 (Traveller details) and Step 3 (Booking and payment) are scheduled for subsequent implementation.
+                      Your itinerary and traveller details are ready. Booking integration for {destination.name} activities is not available yet. You can return to your itinerary and continue planning.
                     </p>
                   </div>
                 </div>
@@ -1472,8 +1748,16 @@ export default function Home() {
                     <strong>{destination.name}, {destination.country}</strong>
                   </div>
                   <div className="placeholder-summary-row">
-                    <span>Planned activities</span>
-                    <strong>{checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</strong>
+                    <span>Lead traveller</span>
+                    <strong>{travellerForm.fullName}</strong>
+                  </div>
+                  <div className="placeholder-summary-row">
+                    <span>Contact</span>
+                    <strong>{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</strong>
+                  </div>
+                  <div className="placeholder-summary-row">
+                    <span>Booking party</span>
+                    <strong>{partySize} {partySize === 1 ? "traveller" : "travellers"} ({checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"})</strong>
                   </div>
                   <div className="placeholder-summary-row">
                     <span>Estimated total</span>
@@ -1482,17 +1766,17 @@ export default function Home() {
                 </div>
 
                 <ul className="placeholder-guarantee-list">
-                  <li>No personal or traveller details have been requested or stored.</li>
-                  <li>No payment, order, or reservation has been initiated.</li>
-                  <li>Your planned itinerary, activities, and budget settings remain intact.</li>
+                  <li>No payment card or payment details have been requested or charged.</li>
+                  <li>No booking or reservation order has been placed with suppliers.</li>
+                  <li>Your entered traveller details remain accessible during your current session.</li>
                 </ul>
 
                 <div className="checkout-actions">
-                  <button type="button" className="checkout-secondary" onClick={() => setCheckoutStep("review")}>
-                    <ArrowLeft size={15} /> Back to trip review
+                  <button type="button" className="checkout-secondary" onClick={() => setCheckoutStep("traveller")}>
+                    <ArrowLeft size={15} /> Back to traveller details
                   </button>
-                  <button type="button" className="checkout-secondary" onClick={returnToItinerary}>
-                    Return to itinerary
+                  <button type="button" className="checkout-primary" onClick={returnToItinerary}>
+                    Back to Itinerary
                   </button>
                 </div>
               </div>
