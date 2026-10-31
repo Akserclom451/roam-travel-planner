@@ -1559,7 +1559,7 @@ export default function Home() {
                     </div>
                   </div>
                   <p className="traveller-summary-note">
-                    Derived from your {checkoutItems.length} planned {checkoutItems.length === 1 ? "activity" : "activities"} in {destination.name}. As lead traveller, this person will receive tickets, booking confirmations, and host communications for all party members.
+                    The primary contact associated with this itinerary.
                   </p>
                 </div>
 
@@ -1636,7 +1636,7 @@ export default function Home() {
                         />
                       </div>
                       <span id="traveller-email-hint" className="form-hint">
-                        Vouchers, itinerary confirmation, and notifications will be sent here
+                        Contact information for your planned booking.
                       </span>
                       {travellerTouched.email && travellerErrors.email && (
                         <span id="traveller-email-error" className="form-error" role="alert">
@@ -1689,7 +1689,7 @@ export default function Home() {
                         </div>
                       </div>
                       <span id="traveller-phone-hint" className="form-hint">
-                        Used for urgent pickup coordination or timing updates by local hosts
+                        Contact phone number for your planned booking.
                       </span>
                       {travellerTouched.phone && travellerErrors.phone && (
                         <span id="traveller-phone-error" className="form-error" role="alert">
@@ -1702,9 +1702,9 @@ export default function Home() {
                   <div className="traveller-privacy-note">
                     <Mail size={16} className="privacy-icon" />
                     <div>
-                      <strong>Contact & coordination</strong>
+                      <strong>Session information</strong>
                       <p>
-                        Your name, email address, and phone number are used to address your booking summary and coordinate activity timings with hosts.
+                        Your contact details remain in the current checkout session. No booking request or supplier communication is sent.
                       </p>
                     </div>
                   </div>
