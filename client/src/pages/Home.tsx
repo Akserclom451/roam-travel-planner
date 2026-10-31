@@ -1,7 +1,9 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
+  Calendar,
   CalendarDays,
   Check,
   ChevronDown,
@@ -73,7 +75,7 @@ function normalizeSavedPlan(plan: SavedPlan): SavedPlan {
   };
 }
 
-type CheckoutStep = "review" | "payment";
+type CheckoutStep = "review" | "traveller-placeholder";
 
 type Activity = {
   id: string;
@@ -806,10 +808,6 @@ export default function Home() {
   };
 
   const openCheckout = () => {
-    if (checkoutItems.length === 0) {
-      flashNotice("Add at least one activity before checkout");
-      return;
-    }
     closeMobilePlan();
     setSelectedActivityId(null);
     setCheckoutStep("review");
@@ -1276,99 +1274,225 @@ export default function Home() {
           <section className="checkout-panel" onClick={(event) => event.stopPropagation()}>
             <div className="checkout-header">
               <div>
-                <span className="section-kicker">ROAM checkout · {destination.currency.code}</span>
-                <h2 id="checkout-dialog-title">{checkoutStep === "review" ? "Review your slow days." : "Payment is not available yet."}</h2>
-                <p>{checkoutStep === "review" ? "Confirm your selected activities, daily pacing, and estimated total." : "Online booking and live payment processing are not connected to ROAM yet."}</p>
+                <span className="section-kicker">ROAM checkout · {destination.name}</span>
+                <h2 id="checkout-dialog-title">
+                  {checkoutStep === "review" ? "Review your trip" : "Traveller details"}
+                </h2>
+                <p>
+                  {checkoutStep === "review"
+                    ? "Make sure everything is right before continuing."
+                    : "Step 2 is currently in development."}
+                </p>
               </div>
               <button type="button" className="icon-button" onClick={returnToItinerary} aria-label="Return to itinerary"><X size={18} /></button>
             </div>
 
             <div className="checkout-progress" aria-label="Checkout steps">
-              {(["review", "payment"] as const).map((step, index) => (
-                <span
-                  key={step}
-                  className={`${checkoutStep === step ? "active" : ""} ${index < (["review", "payment"] as const).indexOf(checkoutStep) ? "complete" : ""}`}
-                >
-                  <i>{index + 1}</i>
-                  {step === "review" ? "Itinerary review" : "Payment status"}
-                </span>
-              ))}
+              <span
+                className={`${checkoutStep === "review" ? "active" : "complete"}`}
+                aria-current={checkoutStep === "review" ? "step" : undefined}
+              >
+                <i>1</i>
+                <span>Review your trip</span>
+              </span>
+              <span
+                className={`${checkoutStep === "traveller-placeholder" ? "active" : "upcoming"}`}
+                aria-current={checkoutStep === "traveller-placeholder" ? "step" : undefined}
+              >
+                <i>2</i>
+                <span>Traveller details</span>
+              </span>
+              <span className="upcoming">
+                <i>3</i>
+                <span>Booking and payment</span>
+              </span>
             </div>
 
             {checkoutStep === "review" && (
               <div className="checkout-body">
-                <div className="checkout-destination"><img src={destination.image} alt="" /><div><span>Destination</span><strong>{destination.name}, {destination.country}</strong><small>Three unhurried days · {destination.currency.code}</small></div></div>
-                <div className="checkout-section-heading"><span>Selected activities</span><small>{checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</small></div>
-                <div className="checkout-items">
-                  {dayIds.map((day) => {
-                    const dayItems = checkoutItems.filter((entry) => entry.day === day);
-                    if (!dayItems.length) return null;
-                    return (
-                      <div className="checkout-day" key={day}>
-                        <div className="checkout-day-heading"><strong>{day}</strong><span>{formatAmount(daySubtotals[day])}</span></div>
-                        {dayItems.map(({ item, activity }) => {
-                          const unit = itineraryAmounts.unitPrices[activity.id] ?? getConvertedUnitPrice(activity.price, rate);
-                          const line = itineraryAmounts.lineTotals[`${day}-${activity.id}`] ?? getConvertedLineTotal(activity.price, item.quantity, rate);
-                          return (
-                            <div className="checkout-item" key={`${day}-${activity.id}`}>
-                              <img src={activity.image} alt="" />
-                              <div>
-                                <strong>{activity.name}</strong>
-                                <small>{item.quantity} × {formatCurrency(unit, displayCurrency)} · {activity.duration}</small>
-                              </div>
-                              <b>{formatCurrency(line, displayCurrency)}</b>
+                {checkoutItems.length === 0 ? (
+                  <div className="checkout-empty-state">
+                    <div className="checkout-empty-icon" aria-hidden="true">
+                      <Compass size={32} />
+                    </div>
+                    <h3>Your itinerary is empty</h3>
+                    <p>
+                      You haven't selected any activities yet. Return to the itinerary planner to choose curated local experiences for {destination.name}.
+                    </p>
+                    <button type="button" className="checkout-primary" onClick={returnToItinerary}>
+                      Return to itinerary planning <ArrowRight size={15} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="checkout-destination-card">
+                      <img
+                        src={destination.image}
+                        alt={destination.name}
+                        className="checkout-destination-img"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="checkout-destination-info">
+                        <div className="checkout-destination-kicker">
+                          <span>Destination</span>
+                          <strong>{destination.name}, {destination.country}</strong>
+                        </div>
+                        {destination.note && (
+                          <p className="checkout-destination-note">{destination.note}</p>
+                        )}
+                        <div className="checkout-dates-panel">
+                          <div className="checkout-date-entry">
+                            <CalendarDays size={14} className="checkout-date-icon" aria-hidden="true" />
+                            <div>
+                              <span className="checkout-date-label">Travel dates</span>
+                              <strong className="checkout-date-unselected">Travel dates not selected</strong>
                             </div>
-                          );
-                        })}
+                          </div>
+                          <div className="checkout-date-entry">
+                            <Clock3 size={14} className="checkout-date-icon" aria-hidden="true" />
+                            <div>
+                              <span className="checkout-date-label">Trip duration</span>
+                              <span className="checkout-date-val">3 days planned (calendar dates unassigned)</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-                <div className="checkout-total"><span>Estimated total</span><strong>{formatAmount(totalCost)}</strong></div>
-                <div className="checkout-rate-note"><small>{getRateStatusDescription(ratesState, displayCurrency)} · All amounts are indicative planning estimates and exclude supplier surcharges or local taxes.</small></div>
-                <div className="checkout-actions">
-                  <button type="button" className="checkout-secondary" onClick={returnToItinerary}>Edit itinerary</button>
-                  <button type="button" className="checkout-primary" onClick={() => setCheckoutStep("payment")}>View payment status <ArrowRight size={16} /></button>
-                </div>
+                    </div>
+
+                    <div className="checkout-section-heading">
+                      <span>Selected activities</span>
+                      <small>{checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</small>
+                    </div>
+
+                    <div className="checkout-items">
+                      {dayIds.map((day) => {
+                        const dayItems = checkoutItems.filter((entry) => entry.day === day);
+                        if (!dayItems.length) return null;
+                        return (
+                          <div className="checkout-day" key={day}>
+                            <div className="checkout-day-heading">
+                              <strong>{day}</strong>
+                              <span>{formatAmount(daySubtotals[day])}</span>
+                            </div>
+                            {dayItems.map(({ item, activity }) => {
+                              const unit = itineraryAmounts.unitPrices[activity.id] ?? getConvertedUnitPrice(activity.price, rate);
+                              const line = itineraryAmounts.lineTotals[`${day}-${activity.id}`] ?? getConvertedLineTotal(activity.price, item.quantity, rate);
+                              return (
+                                <div className="checkout-item" key={`${day}-${activity.id}`}>
+                                  <img
+                                    src={activity.image}
+                                    alt={activity.name}
+                                    className="checkout-item-thumb"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div className="checkout-item-details">
+                                    <div className="checkout-item-header">
+                                      <strong>{activity.name}</strong>
+                                      <b className="checkout-item-price">{formatCurrency(line, displayCurrency)}</b>
+                                    </div>
+                                    {activity.description && (
+                                      <p className="checkout-item-desc">{activity.description}</p>
+                                    )}
+                                    <div className="checkout-item-meta">
+                                      <span>{item.quantity} {item.quantity === 1 ? "participant" : "participants"} × {formatCurrency(unit, displayCurrency)}</span>
+                                      <span aria-hidden="true">·</span>
+                                      <span>{activity.duration}</span>
+                                      <span aria-hidden="true">·</span>
+                                      <span>{activity.location}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="checkout-breakdown">
+                      <div className="checkout-breakdown-row">
+                        <span>Activities subtotal ({checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"})</span>
+                        <strong>{formatAmount(totalCost)}</strong>
+                      </div>
+                      <div className="checkout-breakdown-total">
+                        <div>
+                          <span className="checkout-total-label">Estimated total</span>
+                          <small className="checkout-currency-tag">{displayCurrency} · Indicative estimate</small>
+                        </div>
+                        <strong className="checkout-total-figure">{formatAmount(totalCost)}</strong>
+                      </div>
+                    </div>
+
+                    <div className="checkout-pricing-note" role="note">
+                      <p>
+                        <strong>Prices are estimates.</strong> Supplier availability, final prices, taxes and additional charges must be verified before booking.
+                      </p>
+                      <small className="checkout-rate-caption">
+                        {getRateStatusDescription(ratesState, displayCurrency)}
+                        {displayCurrency !== "EUR" && ratesState.rates[displayCurrency] && ratesState.status !== "fallback" && (
+                          <> · 1 EUR = {formatExchangeRate(ratesState.rates[displayCurrency], displayCurrency)} reference rate</>
+                        )}
+                      </small>
+                    </div>
+
+                    <div className="checkout-actions">
+                      <button type="button" className="checkout-secondary" onClick={returnToItinerary}>
+                        Edit itinerary
+                      </button>
+                      <button
+                        type="button"
+                        className="checkout-primary"
+                        onClick={() => setCheckoutStep("traveller-placeholder")}
+                      >
+                        Continue to traveller details <ArrowRight size={15} />
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
-            {checkoutStep === "payment" && (
-              <div className="checkout-body payment-body">
-                <div className="payment-total">
-                  <div>
-                    <span>Selected itinerary</span>
-                    <strong>{destination.name}, {destination.country} · {checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</strong>
+            {checkoutStep === "traveller-placeholder" && (
+              <div className="checkout-body placeholder-body">
+                <div className="placeholder-status-card" role="status" aria-live="polite">
+                  <div className="placeholder-status-icon" aria-hidden="true">
+                    <Compass size={22} />
                   </div>
-                  <b>{formatAmount(totalCost)}</b>
+                  <div>
+                    <h3>Step 2: Traveller details in development</h3>
+                    <p>
+                      You have completed Step 1 (Review your trip). Step 2 (Traveller details) and Step 3 (Booking and payment) are scheduled for subsequent implementation.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="payment-unavailable-card" role="status" aria-live="polite">
-                  <div className="payment-unavailable-header">
-                    <span className="payment-unavailable-icon" aria-hidden="true"><AlertTriangle size={18} /></span>
-                    <div>
-                      <h3>Payment is not available yet</h3>
-                      <p>ROAM does not have a live payment provider connected yet, so checkout cannot process charges or confirm bookings right now.</p>
-                    </div>
+                <div className="placeholder-summary-card">
+                  <div className="placeholder-summary-row">
+                    <span>Destination</span>
+                    <strong>{destination.name}, {destination.country}</strong>
                   </div>
-                  <ul className="payment-unavailable-list">
-                    <li>No card details are requested or collected.</li>
-                    <li>No payment, order, or reservation has been placed.</li>
-                    <li>Your planned days, quantities, and saved itineraries remain intact.</li>
-                  </ul>
+                  <div className="placeholder-summary-row">
+                    <span>Planned activities</span>
+                    <strong>{checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"}</strong>
+                  </div>
+                  <div className="placeholder-summary-row">
+                    <span>Estimated total</span>
+                    <strong>{formatAmount(totalCost)}</strong>
+                  </div>
                 </div>
+
+                <ul className="placeholder-guarantee-list">
+                  <li>No personal or traveller details have been requested or stored.</li>
+                  <li>No payment, order, or reservation has been initiated.</li>
+                  <li>Your planned itinerary, activities, and budget settings remain intact.</li>
+                </ul>
 
                 <div className="checkout-actions">
-                  <button type="button" className="checkout-secondary" onClick={() => setCheckoutStep("review")}>Back to review</button>
-                  <button type="button" className="checkout-secondary" onClick={returnToItinerary}>Return to itinerary</button>
-                  <button
-                    type="button"
-                    className="checkout-primary"
-                    disabled
-                    aria-disabled="true"
-                    title="Payment cannot proceed until a live payment provider is connected"
-                  >
-                    <Wallet size={15} /> Payment unavailable ({formatAmount(totalCost)})
+                  <button type="button" className="checkout-secondary" onClick={() => setCheckoutStep("review")}>
+                    <ArrowLeft size={15} /> Back to trip review
+                  </button>
+                  <button type="button" className="checkout-secondary" onClick={returnToItinerary}>
+                    Return to itinerary
                   </button>
                 </div>
               </div>
