@@ -2,15 +2,26 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRazorpayRouter } from "./razorpay";
+
+try {
+  process.loadEnvFile?.();
+} catch {
+  // Non-fatal if .env does not exist
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
+export async function startServer() {
   const app = express();
   const server = createServer(app);
 
-  // Serve static files from dist/public in production
+  app.use(express.json());
+
+  // Register Razorpay sandbox API endpoints
+  app.use("/api/razorpay", createRazorpayRouter());
+
   const staticPath =
     process.env.NODE_ENV === "production"
       ? path.resolve(__dirname, "public")
@@ -18,7 +29,6 @@ async function startServer() {
 
   app.use(express.static(staticPath));
 
-  // Handle client-side routing - serve index.html for all routes
   app.get("*", (_req, res) => {
     res.sendFile(path.join(staticPath, "index.html"));
   });
@@ -28,6 +38,8 @@ async function startServer() {
   server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${port}/`);
   });
+
+  return { app, server };
 }
 
 startServer().catch(console.error);

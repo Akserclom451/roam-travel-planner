@@ -3,25 +3,34 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Building2,
   Calendar,
   CalendarDays,
   Check,
+  CheckCheck,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock3,
   Compass,
+  Copy,
+  CreditCard,
   Filter,
   GripVertical,
   Heart,
+  Info,
+  Loader2,
   Mail,
   MapPin,
   Menu,
   Navigation,
   Phone,
   Plus,
+  RotateCcw,
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Trash2,
   User,
@@ -56,6 +65,18 @@ import {
   getDefaultCallingCode,
   validateLeadTravellerForm,
 } from "@/lib/traveller";
+import {
+  type PaymentMethodType,
+  type PaymentFlowStatus,
+  type RazorpayConfigResponse,
+  type CreateOrderResponse,
+  type VerifyPaymentResponse,
+  loadRazorpayScript,
+  fetchRazorpayConfig,
+  createServerOrder,
+  verifyServerPayment,
+  recordPaymentFailure,
+} from "@/lib/razorpay";
 
 type DestinationId = "kyoto" | "lisbon" | "reykjavik";
 type DayId = "Day 1" | "Day 2" | "Day 3";
@@ -88,7 +109,7 @@ function normalizeSavedPlan(plan: SavedPlan): SavedPlan {
   };
 }
 
-type CheckoutStep = "review" | "traveller" | "payment-placeholder";
+type CheckoutStep = "review" | "traveller" | "payment";
 
 type Activity = {
   id: string;
@@ -435,6 +456,14 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>("card");
+  const [paymentStatus, setPaymentStatus] = useState<PaymentFlowStatus>("idle");
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentResult, setPaymentResult] = useState<VerifyPaymentResponse | null>(null);
+  const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfigResponse | null>(null);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [unconfiguredPayloadPreview, setUnconfiguredPayloadPreview] = useState<CreateOrderResponse | Record<string, unknown> | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const noticeTimer = useRef<number | null>(null);
 
@@ -554,13 +583,177 @@ export default function Home() {
     const errs = validateLeadTravellerForm(travellerForm);
     setTravellerErrors(errs);
     if (Object.keys(errs).length === 0) {
-      setCheckoutStep("payment-placeholder");
+      setCheckoutStep("payment");
     } else {
       const firstInvalidField = Object.keys(errs)[0];
       const el = document.getElementById(`traveller-${firstInvalidField}`);
       if (el) {
         el.focus();
       }
+    }
+  };
+
+  const copyToClipboard = (text: string, fieldId: string) => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+      setCopiedField(fieldId);
+      setTimeout(() => setCopiedField(null), 2000);
+    }
+  };
+
+  useEffect(() => {
+    if (checkoutStep === "payment") {
+      let isMounted = true;
+      setPaymentStatus("loading_config");
+      setPaymentError(null);
+      setUnconfiguredPayloadPreview(null);
+      Promise.all([fetchRazorpayConfig(), loadRazorpayScript()])
+        .then(([cfg, scriptLoaded]) => {
+          if (!isMounted) return;
+          setRazorpayConfig(cfg);
+          setPaymentStatus(cfg.isConfigured ? "ready" : "idle");
+          if (!scriptLoaded && cfg.isConfigured) {
+            setPaymentError("Could not load Razorpay checkout script. Please check your network connection.");
+          }
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          setPaymentStatus("idle");
+          setPaymentError(err instanceof Error ? err.message : "Failed to load payment configuration.");
+        });
+      return () => {
+        isMounted = false;
+      };
+    } else if (paymentStatus !== "success") {
+      setPaymentStatus("idle");
+      setPaymentError(null);
+      setUnconfiguredPayloadPreview(null);
+    }
+  }, [checkoutStep]);
+
+  const handleInitiateRazorpayPayment = async () => {
+    if (!razorpayConfig) return;
+    setPaymentError(null);
+
+    // If sandbox credentials not configured in environment
+    if (!razorpayConfig.isConfigured) {
+      setPaymentStatus("creating_order");
+      try {
+        const order = await createServerOrder({
+          amount: totalCost,
+          currency: displayCurrency,
+          items: checkoutItems.map((entry) => ({
+            activityId: entry.activity.id,
+            quantity: entry.item.quantity,
+          })),
+          notes: {
+            destination: destination.name,
+            leadTraveller: travellerForm.fullName,
+            email: travellerForm.email,
+          },
+        });
+        setUnconfiguredPayloadPreview(order.previewPayload || order);
+        setPaymentStatus("idle");
+      } catch (err) {
+        setPaymentError(err instanceof Error ? err.message : "Unable to simulate order payload.");
+        setPaymentStatus("idle");
+      }
+      return;
+    }
+
+    if (!window.Razorpay) {
+      setPaymentError("Razorpay SDK is not loaded. Please refresh and try again.");
+      return;
+    }
+
+    try {
+      setPaymentStatus("creating_order");
+      const order = await createServerOrder({
+        amount: totalCost,
+        currency: displayCurrency,
+        items: checkoutItems.map((entry) => ({
+          activityId: entry.activity.id,
+          quantity: entry.item.quantity,
+        })),
+        notes: {
+          destination: destination.name,
+          leadTraveller: travellerForm.fullName,
+          email: travellerForm.email,
+          phone: `${travellerForm.countryCode} ${travellerForm.phone}`,
+        },
+      });
+
+      setActiveOrderId(order.orderId);
+      setPaymentStatus("processing");
+
+      const options = {
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "ROAM Travel",
+        description: `${destination.name} Itinerary (${checkoutItems.length} activities)`,
+        order_id: order.orderId,
+        prefill: {
+          name: travellerForm.fullName,
+          email: travellerForm.email,
+          contact: `${travellerForm.countryCode}${travellerForm.phone}`,
+        },
+        notes: {
+          destination: destination.name,
+          traveller_count: partySize.toString(),
+        },
+        theme: {
+          color: "#253b2c",
+        },
+        modal: {
+          ondismiss: async () => {
+            setPaymentStatus("cancelled");
+            setPaymentError("Payment session was dismissed or cancelled by the user.");
+            if (order.orderId) {
+              await recordPaymentFailure(order.orderId, "User closed checkout modal");
+            }
+          },
+        },
+        handler: async (response: {
+          razorpay_payment_id: string;
+          razorpay_order_id: string;
+          razorpay_signature: string;
+        }) => {
+          try {
+            setPaymentStatus("processing");
+            const verifyResult = await verifyServerPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+
+            if (verifyResult.verified) {
+              setPaymentResult(verifyResult);
+              setPaymentStatus("success");
+            } else {
+              setPaymentStatus("failed");
+              setPaymentError(verifyResult.error || "Payment signature verification failed.");
+            }
+          } catch (verifyErr) {
+            setPaymentStatus("failed");
+            setPaymentError(verifyErr instanceof Error ? verifyErr.message : "Verification error occurred.");
+          }
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", async (response: any) => {
+        setPaymentStatus("failed");
+        const errMsg = response.error?.description || "Payment failed at gateway.";
+        setPaymentError(errMsg);
+        if (order.orderId) {
+          await recordPaymentFailure(order.orderId, errMsg);
+        }
+      });
+      rzp.open();
+    } catch (err) {
+      setPaymentStatus("failed");
+      setPaymentError(err instanceof Error ? err.message : "Failed to initiate payment order.");
     }
   };
 
@@ -1365,7 +1558,7 @@ export default function Home() {
                     ? "Make sure everything is right before continuing."
                     : checkoutStep === "traveller"
                     ? "Enter contact details for the lead traveller managing this booking."
-                    : `Online booking is not yet available for ${destination.name}.`}
+                    : "Complete test payment via Razorpay sandbox simulation."}
                 </p>
               </div>
               <button type="button" className="icon-button" onClick={returnToItinerary} aria-label="Return to itinerary"><X size={18} /></button>
@@ -1383,20 +1576,20 @@ export default function Home() {
                 className={`${
                   checkoutStep === "traveller"
                     ? "active"
-                    : checkoutStep === "payment-placeholder"
+                    : checkoutStep === "payment"
                     ? "complete"
                     : "upcoming"
                 }`}
                 aria-current={checkoutStep === "traveller" ? "step" : undefined}
               >
-                <i>{checkoutStep === "payment-placeholder" ? <Check size={12} strokeWidth={2.8} /> : "2"}</i>
+                <i>{checkoutStep === "payment" ? <Check size={12} strokeWidth={2.8} /> : "2"}</i>
                 <span>Traveller details</span>
               </span>
               <span
-                className={`${checkoutStep === "payment-placeholder" ? "active" : "upcoming"}`}
-                aria-current={checkoutStep === "payment-placeholder" ? "step" : undefined}
+                className={`${checkoutStep === "payment" ? "active" : "upcoming"}`}
+                aria-current={checkoutStep === "payment" ? "step" : undefined}
               >
-                <i>3</i>
+                <i>{paymentStatus === "success" ? <Check size={12} strokeWidth={2.8} /> : "3"}</i>
                 <span>Booking and payment</span>
               </span>
             </div>
@@ -1728,57 +1921,358 @@ export default function Home() {
               </div>
             )}
 
-            {checkoutStep === "payment-placeholder" && (
-              <div className="checkout-body placeholder-body">
-                <div className="placeholder-status-card" role="status" aria-live="polite">
-                  <div className="placeholder-status-icon" aria-hidden="true">
-                    <Compass size={22} />
-                  </div>
-                  <div>
-                    <h3>Booking integration in progress</h3>
-                    <p>
-                      Your itinerary and traveller details are ready. Booking integration for {destination.name} activities is not available yet. You can return to your itinerary and continue planning.
-                    </p>
-                  </div>
+            {checkoutStep === "payment" && (
+              <div className="checkout-body payment-step-body">
+                {/* Sandbox Test Mode Banner */}
+                <div className="payment-sandbox-banner" role="region" aria-label="Sandbox test mode notice">
+                  <div className="sandbox-banner-badge">SANDBOX TEST MODE</div>
+                  <p>
+                    Razorpay test simulation active. No real bank accounts or credit cards are charged.
+                  </p>
                 </div>
 
-                <div className="placeholder-summary-card">
-                  <div className="placeholder-summary-row">
-                    <span>Destination</span>
-                    <strong>{destination.name}, {destination.country}</strong>
-                  </div>
-                  <div className="placeholder-summary-row">
-                    <span>Lead traveller</span>
-                    <strong>{travellerForm.fullName}</strong>
-                  </div>
-                  <div className="placeholder-summary-row">
-                    <span>Contact</span>
-                    <strong>{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</strong>
-                  </div>
-                  <div className="placeholder-summary-row">
-                    <span>Booking party</span>
-                    <strong>{partySize} {partySize === 1 ? "traveller" : "travellers"} ({checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"})</strong>
-                  </div>
-                  <div className="placeholder-summary-row">
-                    <span>Estimated total</span>
-                    <strong>{formatAmount(totalCost)}</strong>
-                  </div>
-                </div>
+                {paymentStatus === "success" ? (
+                  /* Verified Receipt View */
+                  <div className="payment-verified-card" role="status" aria-live="polite">
+                    <div className="verified-card-header">
+                      <div className="verified-check-icon">
+                        <CheckCircle2 size={32} />
+                      </div>
+                      <div>
+                        <span className="section-kicker">Authorization verified</span>
+                        <h3>Test Payment Completed</h3>
+                        <p>Razorpay sandbox signature successfully validated using HMAC SHA-256.</p>
+                      </div>
+                    </div>
 
-                <ul className="placeholder-guarantee-list">
-                  <li>No payment card or payment details have been requested or charged.</li>
-                  <li>No booking or reservation order has been placed with suppliers.</li>
-                  <li>Your entered traveller details remain accessible during your current session.</li>
-                </ul>
+                    <div className="verified-receipt-grid">
+                      <div className="receipt-row">
+                        <span className="receipt-label">Payment ID</span>
+                        <code className="receipt-value">{paymentResult?.paymentId || "pay_test_simulation"}</code>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Order ID</span>
+                        <code className="receipt-value">{paymentResult?.orderId || activeOrderId || "order_test_simulation"}</code>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Authorized Amount</span>
+                        <strong className="receipt-value text-emphasis">{formatAmount(totalCost)}</strong>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Payment Method</span>
+                        <span className="receipt-value uppercase">{paymentMethod}</span>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Lead Traveller</span>
+                        <span className="receipt-value">{travellerForm.fullName}</span>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Contact</span>
+                        <span className="receipt-value">{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</span>
+                      </div>
+                      <div className="receipt-row">
+                        <span className="receipt-label">Destination</span>
+                        <span className="receipt-value">{destination.name}, {destination.country}</span>
+                      </div>
+                    </div>
 
-                <div className="checkout-actions">
-                  <button type="button" className="checkout-secondary" onClick={() => setCheckoutStep("traveller")}>
-                    <ArrowLeft size={15} /> Back to traveller details
-                  </button>
-                  <button type="button" className="checkout-primary" onClick={returnToItinerary}>
-                    Back to Itinerary
-                  </button>
-                </div>
+                    {/* Phase 4 Strict Disclaimer Callout */}
+                    <div className="phase4-disclaimer-box">
+                      <div className="phase4-disclaimer-title">
+                        <AlertTriangle size={15} />
+                        <strong>Simulation Notice · No Supplier Booking Confirmed</strong>
+                      </div>
+                      <p>
+                        This test payment verified the end-to-end checkout flow and backend signature verification in Razorpay sandbox.
+                        No real money was charged, no supplier reservation has been placed, and no booking voucher has been issued.
+                        Your planned itinerary remains intact in your session.
+                      </p>
+                    </div>
+
+                    <div className="checkout-actions">
+                      <button
+                        type="button"
+                        className="checkout-secondary"
+                        onClick={() => {
+                          setPaymentStatus("idle");
+                          setPaymentResult(null);
+                          setPaymentError(null);
+                        }}
+                      >
+                        <RotateCcw size={15} /> Run another test
+                      </button>
+                      <button
+                        type="button"
+                        className="checkout-primary"
+                        onClick={returnToItinerary}
+                      >
+                        Return to itinerary
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Standard Payment & Simulation View */
+                  <>
+                    {/* Unconfigured Warning Callout if keys are absent */}
+                    {razorpayConfig && !razorpayConfig.isConfigured && (
+                      <div className="payment-warning-callout" role="alert">
+                        <div className="warning-callout-icon">
+                          <Info size={18} />
+                        </div>
+                        <div className="warning-callout-content">
+                          <h4>Razorpay Sandbox Configuration Notice</h4>
+                          <p>
+                            {razorpayConfig.error ||
+                              "Environment variables RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are not configured."}
+                          </p>
+                          <p className="warning-callout-subtext">
+                            Only Razorpay sandbox test keys (starting with <code>rzp_test_</code>) are permitted. You can inspect the authoritative order calculation below without faking a payment gateway response.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Payment Failure / Cancellation Callout - Only on actual payment failure/cancellation */}
+                    {(paymentStatus === "failed" || paymentStatus === "cancelled") && paymentError && (
+                      <div className="payment-error-callout" role="alert">
+                        <AlertTriangle size={18} />
+                        <div>
+                          <strong>{paymentStatus === "cancelled" ? "Payment Dismissed" : "Payment Error"}</strong>
+                          <p>{paymentError}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Payment Method Selector */}
+                    <div className="payment-method-selector-section">
+                      <label className="payment-methods-label">Select Test Payment Method</label>
+                      <div className="payment-methods-grid" role="radiogroup" aria-label="Payment method">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={paymentMethod === "card"}
+                          className={`payment-method-card ${paymentMethod === "card" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("card")}
+                        >
+                          <CreditCard size={18} />
+                          <span>Card</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={paymentMethod === "upi"}
+                          className={`payment-method-card ${paymentMethod === "upi" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("upi")}
+                        >
+                          <Smartphone size={18} />
+                          <span>UPI / QR</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={paymentMethod === "netbanking"}
+                          className={`payment-method-card ${paymentMethod === "netbanking" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("netbanking")}
+                        >
+                          <Building2 size={18} />
+                          <span>NetBanking</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={paymentMethod === "wallet"}
+                          className={`payment-method-card ${paymentMethod === "wallet" ? "selected" : ""}`}
+                          onClick={() => setPaymentMethod("wallet")}
+                        >
+                          <Wallet size={18} />
+                          <span>Wallets</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Test Credentials Helper Box */}
+                    <div className="sandbox-credentials-helper">
+                      <div className="credentials-header">
+                        <Sparkles size={14} />
+                        <span>Razorpay Sandbox Test Credentials (Reference Only)</span>
+                      </div>
+                      <div className="credentials-body">
+                        {paymentMethod === "card" && (
+                          <div className="credentials-detail">
+                            <div className="credential-field">
+                              <span className="field-name">Test Card Number</span>
+                              <div className="credential-copy-group">
+                                <code className="credential-code">4111 1111 1111 1111</code>
+                                <button
+                                  type="button"
+                                  className="credential-copy-btn"
+                                  onClick={() => copyToClipboard("4111 1111 1111 1111", "card")}
+                                  aria-label="Copy test card number"
+                                >
+                                  {copiedField === "card" ? <CheckCheck size={14} className="copied" /> : <Copy size={14} />}
+                                  <span>{copiedField === "card" ? "Copied" : "Copy"}</span>
+                                </button>
+                              </div>
+                            </div>
+                            <div className="credential-field-inline">
+                              <div>
+                                <span className="field-name">Expiry</span>
+                                <code>12/28</code>
+                              </div>
+                              <div>
+                                <span className="field-name">CVV</span>
+                                <code>123</code>
+                              </div>
+                              <div>
+                                <span className="field-name">OTP</span>
+                                <code>123456</code>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {paymentMethod === "upi" && (
+                          <div className="credentials-detail">
+                            <div className="credential-field">
+                              <span className="field-name">Test UPI ID (VPA)</span>
+                              <div className="credential-copy-group">
+                                <code className="credential-code">success@razorpay</code>
+                                <button
+                                  type="button"
+                                  className="credential-copy-btn"
+                                  onClick={() => copyToClipboard("success@razorpay", "upi")}
+                                  aria-label="Copy test UPI ID"
+                                >
+                                  {copiedField === "upi" ? <CheckCheck size={14} className="copied" /> : <Copy size={14} />}
+                                  <span>{copiedField === "upi" ? "Copied" : "Copy"}</span>
+                                </button>
+                              </div>
+                            </div>
+                            <p className="credential-hint">
+                              Simulates instant test authorization. To simulate bank failure, enter <code>failure@razorpay</code>.
+                            </p>
+                          </div>
+                        )}
+
+                        {paymentMethod === "netbanking" && (
+                          <div className="credentials-detail">
+                            <p className="credential-hint">
+                              Inside Razorpay modal, select any test bank (SBI, HDFC, ICICI, etc.). On the bank redirect page, click <strong>Success</strong> to approve the test transaction.
+                            </p>
+                          </div>
+                        )}
+
+                        {paymentMethod === "wallet" && (
+                          <div className="credentials-detail">
+                            <p className="credential-hint">
+                              Choose any test wallet balance inside the Razorpay modal. Mock balance will be authorized automatically in sandbox mode.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Order Recap Card */}
+                    <div className="payment-order-summary">
+                      <div className="summary-title-row">
+                        <span className="summary-title">Order summary</span>
+                        <span className="summary-estimate-badge">Estimate</span>
+                      </div>
+                      <div className="summary-content-rows">
+                        <div className="summary-row">
+                          <span>Destination</span>
+                          <strong>{destination.name}, {destination.country}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Lead traveller</span>
+                          <strong>{travellerForm.fullName}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Contact</span>
+                          <strong>{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Booking party</span>
+                          <strong>
+                            {partySize} {partySize === 1 ? "traveller" : "travellers"} ({checkoutItems.length} {checkoutItems.length === 1 ? "activity" : "activities"})
+                          </strong>
+                        </div>
+                        <div className="summary-row total-row">
+                          <span>Total authorization</span>
+                          <strong>{formatAmount(totalCost)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* If unconfigured, show payload preview on demand */}
+                    {unconfiguredPayloadPreview && (
+                      <div className="payload-preview-card">
+                        <span className="section-kicker">Authoritative order calculation</span>
+                        <h4>Server Order Payload (Preview)</h4>
+                        <pre className="payload-code-block">
+                          {JSON.stringify(unconfiguredPayloadPreview, null, 2)}
+                        </pre>
+                        <small className="payload-note">
+                          Currencies with no decimals (JPY, ISK) use multiplier 1; standard currencies (EUR, USD, INR) use 100 subunits.
+                        </small>
+                      </div>
+                    )}
+
+                    {/* Checkout Action Buttons */}
+                    <div className="checkout-actions">
+                      <button
+                        type="button"
+                        className="checkout-secondary"
+                        onClick={() => setCheckoutStep("traveller")}
+                        disabled={paymentStatus === "creating_order" || paymentStatus === "processing"}
+                      >
+                        <ArrowLeft size={15} /> Back to traveller details
+                      </button>
+
+                      {razorpayConfig && !razorpayConfig.isConfigured ? (
+                        <button
+                          type="button"
+                          className="checkout-primary"
+                          onClick={handleInitiateRazorpayPayment}
+                          disabled={paymentStatus === "creating_order"}
+                        >
+                          {paymentStatus === "creating_order" ? (
+                            <>
+                              <Loader2 size={15} className="animate-spin" /> Calculating payload...
+                            </>
+                          ) : (
+                            <>
+                              <Info size={15} /> Inspect Order Payload
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="checkout-primary pay-button"
+                          onClick={handleInitiateRazorpayPayment}
+                          disabled={
+                            paymentStatus === "loading_config" ||
+                            paymentStatus === "creating_order" ||
+                            paymentStatus === "processing"
+                          }
+                        >
+                          {paymentStatus === "creating_order" || paymentStatus === "processing" ? (
+                            <>
+                              <Loader2 size={16} className="animate-spin" />
+                              <span>{paymentStatus === "creating_order" ? "Preparing sandbox order..." : "Verifying authorization..."}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck size={16} />
+                              <span>Pay {formatAmount(totalCost)} (Sandbox)</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </section>
