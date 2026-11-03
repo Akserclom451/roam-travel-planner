@@ -64,6 +64,10 @@ import {
   calculatePartySize,
   getDefaultCallingCode,
   validateLeadTravellerForm,
+  formatDisplayPhone,
+  formatRazorpayContact,
+  sanitizePhoneNumber,
+  sanitizeLeadTravellerForm,
 } from "@/lib/traveller";
 import {
   type PaymentMethodType,
@@ -71,11 +75,14 @@ import {
   type RazorpayConfigResponse,
   type CreateOrderResponse,
   type VerifyPaymentResponse,
+  type AuthoritativeAmountResponse,
   loadRazorpayScript,
   fetchRazorpayConfig,
+  fetchAuthoritativeOrderAmount,
   createServerOrder,
   verifyServerPayment,
   recordPaymentFailure,
+  buildRazorpayCheckoutOptions,
 } from "@/lib/razorpay";
 
 type DestinationId = "kyoto" | "lisbon" | "reykjavik";
@@ -464,6 +471,7 @@ export default function Home() {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [unconfiguredPayloadPreview, setUnconfiguredPayloadPreview] = useState<CreateOrderResponse | Record<string, unknown> | null>(null);
+  const [authoritativePaymentAmount, setAuthoritativePaymentAmount] = useState<AuthoritativeAmountResponse | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const noticeTimer = useRef<number | null>(null);
 
@@ -574,13 +582,15 @@ export default function Home() {
   };
 
   const handleProceedToPayment = () => {
+    const sanitizedForm = sanitizeLeadTravellerForm(travellerForm);
+    setTravellerForm(sanitizedForm);
     setTravellerTouched({
       fullName: true,
       email: true,
       countryCode: true,
       phone: true,
     });
-    const errs = validateLeadTravellerForm(travellerForm);
+    const errs = validateLeadTravellerForm(sanitizedForm);
     setTravellerErrors(errs);
     if (Object.keys(errs).length === 0) {
       setCheckoutStep("payment");
@@ -592,6 +602,7 @@ export default function Home() {
       }
     }
   };
+
 
   const copyToClipboard = (text: string, fieldId: string) => {
     if (navigator?.clipboard?.writeText) {
@@ -607,10 +618,25 @@ export default function Home() {
       setPaymentStatus("loading_config");
       setPaymentError(null);
       setUnconfiguredPayloadPreview(null);
-      Promise.all([fetchRazorpayConfig(), loadRazorpayScript()])
-        .then(([cfg, scriptLoaded]) => {
+
+      const itemsPayload = checkoutItems.map((entry) => ({
+        activityId: entry.activity.id,
+        quantity: entry.item.quantity,
+      }));
+
+      Promise.all([
+        fetchRazorpayConfig(),
+        loadRazorpayScript(),
+        itemsPayload.length > 0
+          ? fetchAuthoritativeOrderAmount({ items: itemsPayload, currency: displayCurrency }).catch(() => null)
+          : Promise.resolve(null),
+      ])
+        .then(([cfg, scriptLoaded, authAmount]) => {
           if (!isMounted) return;
           setRazorpayConfig(cfg);
+          if (authAmount) {
+            setAuthoritativePaymentAmount(authAmount);
+          }
           setPaymentStatus(cfg.isConfigured ? "ready" : "idle");
           if (!scriptLoaded && cfg.isConfigured) {
             setPaymentError("Could not load Razorpay checkout script. Please check your network connection.");
@@ -628,8 +654,9 @@ export default function Home() {
       setPaymentStatus("idle");
       setPaymentError(null);
       setUnconfiguredPayloadPreview(null);
+      setAuthoritativePaymentAmount(null);
     }
-  }, [checkoutStep]);
+  }, [checkoutStep, checkoutItems, displayCurrency]);
 
   const handleInitiateRazorpayPayment = async () => {
     if (!razorpayConfig) return;
@@ -640,7 +667,6 @@ export default function Home() {
       setPaymentStatus("creating_order");
       try {
         const order = await createServerOrder({
-          amount: totalCost,
           currency: displayCurrency,
           items: checkoutItems.map((entry) => ({
             activityId: entry.activity.id,
@@ -648,10 +674,21 @@ export default function Home() {
           })),
           notes: {
             destination: destination.name,
-            leadTraveller: travellerForm.fullName,
-            email: travellerForm.email,
+            leadTraveller: travellerForm.fullName.trim(),
+            email: travellerForm.email.trim(),
+            phone: formatDisplayPhone(travellerForm.countryCode, travellerForm.phone),
           },
+
         });
+        if (order.formattedAmount) {
+          setAuthoritativePaymentAmount({
+            amount: order.displayAmount,
+            amountInSubunits: order.amount,
+            currency: order.currency,
+            formattedAmount: order.formattedAmount,
+            totalCostEur,
+          });
+        }
         setUnconfiguredPayloadPreview(order.previewPayload || order);
         setPaymentStatus("idle");
       } catch (err) {
@@ -669,7 +706,6 @@ export default function Home() {
     try {
       setPaymentStatus("creating_order");
       const order = await createServerOrder({
-        amount: totalCost,
         currency: displayCurrency,
         items: checkoutItems.map((entry) => ({
           activityId: entry.activity.id,
@@ -677,42 +713,44 @@ export default function Home() {
         })),
         notes: {
           destination: destination.name,
-          leadTraveller: travellerForm.fullName,
-          email: travellerForm.email,
-          phone: `${travellerForm.countryCode} ${travellerForm.phone}`,
+          leadTraveller: travellerForm.fullName.trim(),
+          email: travellerForm.email.trim(),
+          phone: formatDisplayPhone(travellerForm.countryCode, travellerForm.phone),
+          preferred_method: paymentMethod,
         },
       });
+
+      if (order.formattedAmount) {
+        setAuthoritativePaymentAmount({
+          amount: order.displayAmount,
+          amountInSubunits: order.amount,
+          currency: order.currency,
+          formattedAmount: order.formattedAmount,
+          totalCostEur,
+        });
+      }
 
       setActiveOrderId(order.orderId);
       setPaymentStatus("processing");
 
-      const options = {
-        key: order.keyId,
+      const options = buildRazorpayCheckoutOptions({
+        keyId: order.keyId,
+        orderId: order.orderId,
         amount: order.amount,
         currency: order.currency,
-        name: "ROAM Travel",
-        description: `${destination.name} Itinerary (${checkoutItems.length} activities)`,
-        order_id: order.orderId,
-        prefill: {
-          name: travellerForm.fullName,
-          email: travellerForm.email,
-          contact: `${travellerForm.countryCode}${travellerForm.phone}`,
-        },
-        notes: {
-          destination: destination.name,
-          traveller_count: partySize.toString(),
-        },
-        theme: {
-          color: "#253b2c",
-        },
-        modal: {
-          ondismiss: async () => {
-            setPaymentStatus("cancelled");
-            setPaymentError("Payment session was dismissed or cancelled by the user.");
-            if (order.orderId) {
-              await recordPaymentFailure(order.orderId, "User closed checkout modal");
-            }
-          },
+        destinationName: destination.name,
+        activityCount: checkoutItems.length,
+        fullName: travellerForm.fullName,
+        email: travellerForm.email,
+        contact: formatRazorpayContact(travellerForm.countryCode, travellerForm.phone),
+        paymentMethod,
+        partySize,
+        onDismiss: async () => {
+          setPaymentStatus("cancelled");
+          setPaymentError("Payment session was dismissed or cancelled by the user.");
+          if (order.orderId) {
+            await recordPaymentFailure(order.orderId, "User closed checkout modal", "cancelled");
+          }
         },
         handler: async (response: {
           razorpay_payment_id: string;
@@ -739,7 +777,8 @@ export default function Home() {
             setPaymentError(verifyErr instanceof Error ? verifyErr.message : "Verification error occurred.");
           }
         },
-      };
+      });
+
 
       const rzp = new window.Razorpay(options);
       rzp.on("payment.failed", async (response: any) => {
@@ -747,7 +786,7 @@ export default function Home() {
         const errMsg = response.error?.description || "Payment failed at gateway.";
         setPaymentError(errMsg);
         if (order.orderId) {
-          await recordPaymentFailure(order.orderId, errMsg);
+          await recordPaymentFailure(order.orderId, errMsg, "failed");
         }
       });
       rzp.open();
@@ -1948,15 +1987,20 @@ export default function Home() {
                     <div className="verified-receipt-grid">
                       <div className="receipt-row">
                         <span className="receipt-label">Payment ID</span>
-                        <code className="receipt-value">{paymentResult?.paymentId || "pay_test_simulation"}</code>
+                        <code className="receipt-value">{paymentResult?.paymentId || "—"}</code>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Order ID</span>
-                        <code className="receipt-value">{paymentResult?.orderId || activeOrderId || "order_test_simulation"}</code>
+                        <code className="receipt-value">{paymentResult?.orderId || "—"}</code>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Authorized Amount</span>
-                        <strong className="receipt-value text-emphasis">{formatAmount(totalCost)}</strong>
+                        <strong className="receipt-value text-emphasis">
+                          {paymentResult?.formattedAmount ||
+                            (paymentResult?.amount !== undefined && paymentResult?.currency
+                              ? `${paymentResult.currency === "JPY" ? "¥" : paymentResult.currency === "ISK" ? "kr " : "€"}${paymentResult.amount.toLocaleString()}`
+                              : "—")}
+                        </strong>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Payment Method</span>
@@ -1964,17 +2008,21 @@ export default function Home() {
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Lead Traveller</span>
-                        <span className="receipt-value">{travellerForm.fullName}</span>
+                        <span className="receipt-value">{paymentResult?.leadTraveller || travellerForm.fullName.trim()}</span>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Contact</span>
-                        <span className="receipt-value">{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</span>
+                        <span className="receipt-value">
+                          {paymentResult?.contact ||
+                            `${travellerForm.email.trim()} · ${formatDisplayPhone(travellerForm.countryCode, travellerForm.phone)}`}
+                        </span>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Destination</span>
                         <span className="receipt-value">{destination.name}, {destination.country}</span>
                       </div>
                     </div>
+
 
                     {/* Phase 4 Strict Disclaimer Callout */}
                     <div className="phase4-disclaimer-box">
@@ -2056,6 +2104,7 @@ export default function Home() {
                         >
                           <CreditCard size={18} />
                           <span>Card</span>
+                          <span className="method-currency-tag supported">Active ({displayCurrency})</span>
                         </button>
                         <button
                           type="button"
@@ -2066,6 +2115,7 @@ export default function Home() {
                         >
                           <Smartphone size={18} />
                           <span>UPI / QR</span>
+                          <span className="method-currency-tag inr-only">INR Only</span>
                         </button>
                         <button
                           type="button"
@@ -2076,6 +2126,7 @@ export default function Home() {
                         >
                           <Building2 size={18} />
                           <span>NetBanking</span>
+                          <span className="method-currency-tag inr-only">INR Only</span>
                         </button>
                         <button
                           type="button"
@@ -2086,8 +2137,19 @@ export default function Home() {
                         >
                           <Wallet size={18} />
                           <span>Wallets</span>
+                          <span className="method-currency-tag inr-only">INR Only</span>
                         </button>
                       </div>
+
+                      {/* Informative Gateway Notice for Currency Incompatibilities */}
+                      {paymentMethod !== "card" && (
+                        <div className="gateway-currency-notice" role="note">
+                          <Info size={15} className="notice-icon" />
+                          <span>
+                            This itinerary uses {displayCurrency}. Some domestic payment options may not be available for this currency. Available methods will be shown by Razorpay at checkout.
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Test Credentials Helper Box */}
@@ -2124,9 +2186,17 @@ export default function Home() {
                                 <code>123</code>
                               </div>
                               <div>
-                                <span className="field-name">OTP</span>
+                                <span className="field-name">Test OTP</span>
                                 <code>123456</code>
                               </div>
+                            </div>
+                            <div className="credential-scenarios-note">
+                              <p className="credential-hint">
+                                <strong>Test Scenarios:</strong> Enter <code>123456</code> or click "Skip OTP" for instant authorization. To simulate a bank decline, click "Cancel" or "Fail" in the OTP modal.
+                              </p>
+                              <p className="credential-regulatory-note">
+                                <strong>International & RBI Notice:</strong> Razorpay processes international JPY in zero-decimal units (integer Yen). Razorpay's checkout modal automatically renders Reserve Bank of India (RBI) card tokenization guidelines for card transactions; ROAM uses standard parameters.
+                              </p>
                             </div>
                           </div>
                         )}
@@ -2151,13 +2221,19 @@ export default function Home() {
                             <p className="credential-hint">
                               Simulates instant test authorization. To simulate bank failure, enter <code>failure@razorpay</code>.
                             </p>
+                            <p className="credential-regulatory-note">
+                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes UPI in the checkout sequence. However, because UPI is strictly an INR-denominated domestic network, the Razorpay drawer presents Card entry for {displayCurrency} transactions.
+                            </p>
                           </div>
                         )}
 
                         {paymentMethod === "netbanking" && (
                           <div className="credentials-detail">
                             <p className="credential-hint">
-                              Inside Razorpay modal, select any test bank (SBI, HDFC, ICICI, etc.). On the bank redirect page, click <strong>Success</strong> to approve the test transaction.
+                              Inside Razorpay modal, select any test bank (SBI, HDFC, ICICI, etc.). On the bank redirect page, click <strong>Success</strong> to approve the test transaction, or <strong>Failure</strong> to test rejection.
+                            </p>
+                            <p className="credential-regulatory-note">
+                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes NetBanking in the checkout sequence. Indian NetBanking operates on domestic INR clearing rails; international currency transactions automatically present Card entry in Razorpay's hosted drawer.
                             </p>
                           </div>
                         )}
@@ -2167,16 +2243,23 @@ export default function Home() {
                             <p className="credential-hint">
                               Choose any test wallet balance inside the Razorpay modal. Mock balance will be authorized automatically in sandbox mode.
                             </p>
+                            <p className="credential-regulatory-note">
+                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes Wallets in the checkout sequence. Domestic Indian wallets operate in INR; Razorpay presents Card entry for {displayCurrency} transactions.
+                            </p>
                           </div>
                         )}
+
                       </div>
                     </div>
+
 
                     {/* Order Recap Card */}
                     <div className="payment-order-summary">
                       <div className="summary-title-row">
                         <span className="summary-title">Order summary</span>
-                        <span className="summary-estimate-badge">Estimate</span>
+                        {authoritativePaymentAmount ? (
+                          <span className="summary-estimate-badge locked-badge">LOCKED TOTAL</span>
+                        ) : null}
                       </div>
                       <div className="summary-content-rows">
                         <div className="summary-row">
@@ -2189,7 +2272,7 @@ export default function Home() {
                         </div>
                         <div className="summary-row">
                           <span>Contact</span>
-                          <strong>{travellerForm.email} · {travellerForm.countryCode} {travellerForm.phone}</strong>
+                          <strong>{travellerForm.email.trim()} · {formatDisplayPhone(travellerForm.countryCode, travellerForm.phone)}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Booking party</span>
@@ -2198,11 +2281,12 @@ export default function Home() {
                           </strong>
                         </div>
                         <div className="summary-row total-row">
-                          <span>Total authorization</span>
-                          <strong>{formatAmount(totalCost)}</strong>
+                          <span>{authoritativePaymentAmount ? "Locked Total" : "Estimated Total"}</span>
+                          <strong>{authoritativePaymentAmount ? authoritativePaymentAmount.formattedAmount : formatAmount(totalCost)}</strong>
                         </div>
                       </div>
                     </div>
+
 
                     {/* If unconfigured, show payload preview on demand */}
                     {unconfiguredPayloadPreview && (
@@ -2265,7 +2349,7 @@ export default function Home() {
                           ) : (
                             <>
                               <ShieldCheck size={16} />
-                              <span>Pay {formatAmount(totalCost)} (Sandbox)</span>
+                              <span>Pay {authoritativePaymentAmount ? authoritativePaymentAmount.formattedAmount : formatAmount(totalCost)} (Sandbox)</span>
                             </>
                           )}
                         </button>

@@ -3,6 +3,10 @@ import {
   calculatePartySize,
   getDefaultCallingCode,
   validateLeadTravellerForm,
+  sanitizePhoneNumber,
+  formatDisplayPhone,
+  formatRazorpayContact,
+  sanitizeLeadTravellerForm,
   type LeadTravellerForm,
 } from "./traveller";
 
@@ -25,6 +29,64 @@ describe("ROAM Checkout Step 2: Lead Traveller Logic", () => {
       expect(getDefaultCallingCode("lisbon")).toBe("+351");
       expect(getDefaultCallingCode("reykjavik")).toBe("+354");
       expect(getDefaultCallingCode("unknown")).toBe("+1");
+    });
+  });
+
+  describe("Phone Sanitization and Cross-Stage Consistency", () => {
+    it("strips redundant leading country code when pasted with plus or digits", () => {
+      expect(sanitizePhoneNumber("+81 90 1234 5678", "+81")).toBe("90 1234 5678");
+      expect(sanitizePhoneNumber("+819012345678", "+81")).toBe("9012345678");
+      expect(sanitizePhoneNumber("00819012345678", "+81")).toBe("9012345678");
+      expect(sanitizePhoneNumber("+1 (555) 019-9234", "+1")).toBe("(555) 019-9234");
+    });
+
+    it("preserves national number when already cleanly formatted", () => {
+      expect(sanitizePhoneNumber("555-0199", "+1")).toBe("555-0199");
+      expect(sanitizePhoneNumber("90 1234 5678", "+81")).toBe("90 1234 5678");
+    });
+
+    it("formats display phone consistently for Step 2, Step 3, and receipt", () => {
+      expect(formatDisplayPhone("+81", "90 1234 5678")).toBe("+81 90 1234 5678");
+      expect(formatDisplayPhone("+81", "+81 90 1234 5678")).toBe("+81 90 1234 5678");
+      expect(formatDisplayPhone("+1", "555-0199")).toBe("+1 555-0199");
+      expect(formatDisplayPhone("+351", "912 345 678")).toBe("+351 912 345 678");
+    });
+
+    it("formats Razorpay contact in clean E.164 compatible format", () => {
+      expect(formatRazorpayContact("+81", "90 1234 5678")).toBe("+819012345678");
+      expect(formatRazorpayContact("+81", "+81 90 1234 5678")).toBe("+819012345678");
+      expect(formatRazorpayContact("+1", "(555) 019-9234")).toBe("+15550199234");
+      expect(formatRazorpayContact("+351", "912 345 678")).toBe("+351912345678");
+    });
+
+    it("ensures contact is strictly consistent across all 4 checkout stages", () => {
+      const rawInput: LeadTravellerForm = {
+        fullName: "  Eleanor Vance  ",
+        email: "  eleanor.vance@example.com  ",
+        countryCode: "+81",
+        phone: "+81 90 1234 5678", // Pasted with calling code
+      };
+
+      // Stage (a): Sanitized Form (Step 2)
+      const sanitized = sanitizeLeadTravellerForm(rawInput);
+      expect(sanitized.fullName).toBe("Eleanor Vance");
+      expect(sanitized.email).toBe("eleanor.vance@example.com");
+      expect(sanitized.countryCode).toBe("+81");
+      expect(sanitized.phone).toBe("90 1234 5678");
+
+      // Stage (b): Step 3 Summary
+      const step3Display = `${sanitized.email} · ${formatDisplayPhone(sanitized.countryCode, sanitized.phone)}`;
+      expect(step3Display).toBe("eleanor.vance@example.com · +81 90 1234 5678");
+
+      // Stage (c): Order notes & Razorpay prefill
+      const orderNotesPhone = formatDisplayPhone(sanitized.countryCode, sanitized.phone);
+      const razorpayPrefillContact = formatRazorpayContact(sanitized.countryCode, sanitized.phone);
+      expect(orderNotesPhone).toBe("+81 90 1234 5678");
+      expect(razorpayPrefillContact).toBe("+819012345678");
+
+      // Stage (d): Receipt Contact
+      const receiptContact = `${sanitized.email} · ${formatDisplayPhone(sanitized.countryCode, sanitized.phone)}`;
+      expect(receiptContact).toBe(step3Display);
     });
   });
 
@@ -99,3 +161,4 @@ describe("ROAM Checkout Step 2: Lead Traveller Logic", () => {
     });
   });
 });
+

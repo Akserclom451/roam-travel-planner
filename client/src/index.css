@@ -1626,6 +1626,48 @@ h1 em { color: #d85d43; font-style: italic; }
   box-shadow: 0 0 0 1px #24392c;
 }
 
+.method-currency-tag {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 2px;
+  margin-top: 2px;
+}
+
+.method-currency-tag.supported {
+  background: #e2ede2;
+  color: #1b5327;
+}
+
+.method-currency-tag.inr-only {
+  background: #f4ede0;
+  color: #7d5918;
+}
+
+.gateway-currency-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #fbf7ee;
+  border: 1px solid #ebd9b8;
+  border-left: 3px solid #d4972b;
+  font-size: 11.5px;
+  color: #634b1d;
+  line-height: 1.45;
+  border-radius: 2px;
+}
+
+.gateway-currency-notice .notice-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #c4861b;
+}
+
+
 /* Sandbox Credentials Helper */
 .sandbox-credentials-helper {
   padding: 14px 18px;
@@ -1739,6 +1781,21 @@ h1 em { color: #d85d43; font-style: italic; }
   color: #233928;
 }
 
+.credential-scenarios-note {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.credential-regulatory-note {
+  margin: 0;
+  font-size: 11px;
+  color: #637765;
+  line-height: 1.45;
+}
+
+
 /* Payment Order Summary */
 .payment-order-summary {
   padding: 16px 20px;
@@ -1773,6 +1830,13 @@ h1 em { color: #d85d43; font-style: italic; }
   padding: 2px 7px;
   border-radius: 2px;
 }
+
+.summary-estimate-badge.locked-badge {
+  background: #e2ede2;
+  color: #1b5327;
+  border: 1px solid #bfd9c1;
+}
+
 
 .summary-content-rows {
   display: flex;
@@ -2036,6 +2100,28 @@ code.receipt-value {
   box-shadow: 0 0 0 1px #5d8869;
 }
 
+.dark .method-currency-tag.supported {
+  background: #18351f;
+  color: #8ae09f;
+}
+
+.dark .method-currency-tag.inr-only {
+  background: #382d1c;
+  color: #e5b367;
+}
+
+.dark .gateway-currency-notice {
+  background: #2b2214;
+  border-color: #4b391e;
+  border-left-color: #e2a53b;
+  color: #ecd7b7;
+}
+
+.dark .gateway-currency-notice .notice-icon {
+  color: #f7b461;
+}
+
+
 .dark .sandbox-credentials-helper {
   background: #1b261d;
   border-color: #36483a;
@@ -2083,6 +2169,11 @@ code.receipt-value {
   color: #e6f1e5;
 }
 
+.dark .credential-regulatory-note {
+  color: #92a895;
+}
+
+
 .dark .payment-order-summary {
   background: #1e2b21;
   border-color: #384c3d;
@@ -2100,6 +2191,13 @@ code.receipt-value {
   background: #283a2c;
   color: #b0c4b2;
 }
+
+.dark .summary-estimate-badge.locked-badge {
+  background: #18351f;
+  color: #8ae09f;
+  border: 1px solid #2e5937;
+}
+
 
 .dark .summary-row {
   color: #a9baa9;

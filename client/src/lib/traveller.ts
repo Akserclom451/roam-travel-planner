@@ -64,6 +64,72 @@ export function calculatePartySize(quantities: number[]): number {
 }
 
 /**
+ * Sanitizes phone numbers by stripping duplicate country calling codes,
+ * extraneous non-phone characters, and redundant leading zeros.
+ */
+export function sanitizePhoneNumber(phone: string, countryCode?: string): string {
+  if (!phone) return "";
+  let cleaned = phone.trim();
+
+  // If user pasted or typed with leading country calling code (e.g. "+81 90 1234 5678", "+819012345678", "819012345678")
+  if (countryCode) {
+    const rawCode = countryCode.trim(); // e.g. "+81"
+    const digitsCode = rawCode.replace(/\D/g, ""); // e.g. "81"
+
+    if (cleaned.startsWith(rawCode)) {
+      cleaned = cleaned.slice(rawCode.length).trim();
+    } else if (digitsCode && cleaned.startsWith(`+${digitsCode}`)) {
+      cleaned = cleaned.slice(digitsCode.length + 1).trim();
+    } else if (digitsCode && cleaned.startsWith(`00${digitsCode}`)) {
+      cleaned = cleaned.slice(digitsCode.length + 2).trim();
+    }
+  }
+
+  // Remove duplicate spaces and preserve standard national digits/separators
+  cleaned = cleaned.replace(/\s+/g, " ");
+
+  return cleaned;
+}
+
+/**
+ * Standard readable phone format across Step 2, Step 3, and receipt:
+ * e.g. "+81 90 1234 5678" or "+1 555-0199"
+ */
+export function formatDisplayPhone(countryCode: string, phone: string): string {
+  const sanitized = sanitizePhoneNumber(phone, countryCode);
+  const cleanCode = (countryCode || "").trim();
+  if (!sanitized) return "";
+  if (!cleanCode) return sanitized;
+  return `${cleanCode} ${sanitized}`;
+}
+
+/**
+ * Razorpay prefill contact format:
+ * Razorpay expects clean E.164-compatible format (calling code + digits with optional leading +)
+ * without spaces, hyphens, or parentheses.
+ */
+export function formatRazorpayContact(countryCode: string, phone: string): string {
+  const sanitized = sanitizePhoneNumber(phone, countryCode);
+  const codeDigits = (countryCode || "").replace(/\D/g, "");
+  const phoneDigits = sanitized.replace(/\D/g, "");
+  if (!phoneDigits) return "";
+  if (!codeDigits) return phoneDigits;
+  return `+${codeDigits}${phoneDigits}`;
+}
+
+/**
+ * Normalizes all lead traveller fields before proceeding to payment.
+ */
+export function sanitizeLeadTravellerForm(form: LeadTravellerForm): LeadTravellerForm {
+  return {
+    fullName: (form.fullName || "").trim(),
+    email: (form.email || "").trim(),
+    countryCode: (form.countryCode || "").trim(),
+    phone: sanitizePhoneNumber(form.phone || "", form.countryCode),
+  };
+}
+
+/**
  * Validates lead traveller form fields.
  * Ensures:
  * - Full name is not empty and has at least 2 characters
@@ -94,13 +160,13 @@ export function validateLeadTravellerForm(form: LeadTravellerForm): LeadTravelle
     errors.countryCode = "Please select a country calling code";
   }
 
-  const trimmedPhone = (form.phone || "").trim();
-  const digitsOnly = trimmedPhone.replace(/\D/g, "");
+  const sanitizedPhone = sanitizePhoneNumber(form.phone || "", form.countryCode);
+  const digitsOnly = sanitizedPhone.replace(/\D/g, "");
   const allowedChars = /^[\d\s\-()+.]+$/;
 
-  if (!trimmedPhone) {
+  if (!sanitizedPhone) {
     errors.phone = "Please enter your phone number";
-  } else if (!allowedChars.test(trimmedPhone)) {
+  } else if (!allowedChars.test(sanitizedPhone)) {
     errors.phone = "Phone number can only contain digits, spaces, and hyphens";
   } else if (digitsOnly.length < 6 || digitsOnly.length > 15) {
     errors.phone = "Please enter a valid phone number (6 to 15 digits)";
@@ -108,3 +174,4 @@ export function validateLeadTravellerForm(form: LeadTravellerForm): LeadTravelle
 
   return errors;
 }
+
