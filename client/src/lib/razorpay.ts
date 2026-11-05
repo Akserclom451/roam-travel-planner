@@ -56,6 +56,7 @@ export interface VerifyPaymentResponse {
   contact?: string;
   isTestMode?: boolean;
   duplicate?: boolean;
+  pendingCapture?: boolean;
   message?: string;
   disclaimer?: string;
   error?: string;

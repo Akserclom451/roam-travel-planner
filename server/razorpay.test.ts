@@ -916,6 +916,67 @@ describe("ROAM Razorpay Server Logic", () => {
       }
     });
 
+    it("rejects an authorized-only payment with HTTP 409 and pendingCapture: true without marking the order as paid (S3-01)", async () => {
+      const orderId = "order_authorized_only";
+      const paymentId = "pay_auth_only_123";
+      const signature = crypto
+        .createHmac("sha256", testSecret)
+        .update(`${orderId}|${paymentId}`)
+        .digest("hex");
+
+      saveStoredOrder({
+        orderId,
+        amount: 4200,
+        displayAmount: 42,
+        currency: "EUR",
+        receipt: "rcpt_auth_only_1",
+        status: "created",
+        createdAt: Date.now(),
+      });
+
+      const mockRazorpay = {
+        payments: {
+          fetch: async (id: string) => {
+            expect(id).toBe(paymentId);
+            return {
+              id: paymentId,
+              order_id: orderId,
+              amount: 4200,
+              currency: "EUR",
+              status: "authorized",
+            };
+          },
+        },
+      };
+
+      const app = createApp(mockRazorpay);
+      const server = await createTestServer(app);
+      try {
+        const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            razorpay_order_id: orderId,
+            razorpay_payment_id: paymentId,
+            razorpay_signature: signature,
+          }),
+        });
+
+        const body = await res.json();
+        expect(res.status).toBe(409);
+        expect(body.verified).toBe(false);
+        expect(body.pendingCapture).toBe(true);
+        expect(body.error).toContain("Payment is authorized but not captured");
+
+        const stored = getStoredOrder(orderId);
+        expect(stored?.status).toBe("created");
+        expect(stored?.paidAt).toBeUndefined();
+        expect(stored?.paymentId).toBeUndefined();
+      } finally {
+        await server.close();
+      }
+    });
+
     it("returns HTTP 502 when Razorpay API fetch encounters network or gateway error", async () => {
       const orderId = "order_api_err";
       const paymentId = "pay_api_err";

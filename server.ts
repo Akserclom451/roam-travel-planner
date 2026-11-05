@@ -40,7 +40,9 @@ export async function startServer() {
     });
   }
 
-  const port = Number(process.env.PORT) || 3000;
+  // In development, the app server must run on port 3000 behind the NGINX proxy (port 8080).
+  // Only production deployments should bind directly to process.env.PORT.
+  const port = isProduction ? Number(process.env.PORT) || 8080 : 3000;
 
   server.listen(port, "0.0.0.0", () => {
     console.log(`ROAM server running on http://0.0.0.0:${port}/`);

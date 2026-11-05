@@ -826,11 +826,21 @@ export function createRazorpayRouter(options?: {
         return;
       }
 
-      // Confirm payment status is captured or authorized
+      // Confirm payment status is strictly captured.
+      // An authorized payment is not captured yet and must not be marked as paid.
       const paymentStatus = (razorpayPayment.status || "").toLowerCase();
-      if (paymentStatus !== "captured" && paymentStatus !== "authorized") {
+      if (paymentStatus === "authorized") {
+        res.status(409).json({
+          error: "Payment is authorized but not captured. Order has not been marked as paid.",
+          verified: false,
+          pendingCapture: true,
+        });
+        return;
+      }
+
+      if (paymentStatus !== "captured") {
         res.status(400).json({
-          error: `Payment verification failed: Razorpay payment status is '${paymentStatus}'. Expected 'captured' or 'authorized'.`,
+          error: `Payment verification failed: Razorpay payment status is '${paymentStatus}'. Expected 'captured'.`,
           verified: false,
         });
         return;
