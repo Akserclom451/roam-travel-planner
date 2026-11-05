@@ -21,6 +21,12 @@ import {
   saveStoredOrder,
   getStoredOrder,
   createRazorpayRouter,
+  isValidCurrency,
+  isValidRazorpayOrderId,
+  isValidRazorpayPaymentId,
+  isValidRazorpaySignature,
+  isValidReceipt,
+  validateRazorpayNotes,
   type StoredOrder,
 } from "./razorpay";
 
@@ -658,7 +664,7 @@ describe("ROAM Razorpay Server Logic", () => {
           body: JSON.stringify({
             razorpay_order_id: orderId,
             razorpay_payment_id: paymentId,
-            razorpay_signature: "tampered_signature_hex",
+            razorpay_signature: "e".repeat(64), // Valid 64-hex length, invalid HMAC signature
           }),
         });
 
@@ -1344,6 +1350,330 @@ describe("ROAM Razorpay Server Logic", () => {
       } finally {
         await server.close();
       }
+    });
+  });
+
+  describe("S3-03: Strict Input Validation", () => {
+    const testSecret = "test_secret_key_123456";
+
+    describe("Helper function unit checks", () => {
+      it("validates currencies without runtime errors on non-string inputs", () => {
+        expect(isValidCurrency("EUR")).toBe(true);
+        expect(isValidCurrency("JPY")).toBe(true);
+        expect(isValidCurrency("ISK")).toBe(true);
+        expect(isValidCurrency("INR")).toBe(true);
+        expect(isValidCurrency("eur")).toBe(true);
+        expect(isValidCurrency("  EUR  ")).toBe(true);
+        expect(isValidCurrency("USD")).toBe(false);
+        expect(isValidCurrency("")).toBe(false);
+        expect(isValidCurrency(null)).toBe(false);
+        expect(isValidCurrency(undefined)).toBe(false);
+        expect(isValidCurrency(123)).toBe(false);
+        expect(isValidCurrency({})).toBe(false);
+        expect(isValidCurrency([])).toBe(false);
+      });
+
+      it("validates Razorpay order IDs strictly requiring 'order_' prefix", () => {
+        expect(isValidRazorpayOrderId("order_12345678")).toBe(true);
+        expect(isValidRazorpayOrderId("order_ABC12345xyz")).toBe(true);
+        expect(isValidRazorpayOrderId("order_c1")).toBe(false); // under 3 suffix chars
+        expect(isValidRazorpayOrderId("pay_12345678")).toBe(false);
+        expect(isValidRazorpayOrderId("order_")).toBe(false);
+        expect(isValidRazorpayOrderId(" order_12345678 ")).toBe(false); // no silent trimming
+        expect(isValidRazorpayOrderId("")).toBe(false);
+        expect(isValidRazorpayOrderId(null)).toBe(false);
+        expect(isValidRazorpayOrderId(12345)).toBe(false);
+      });
+
+      it("validates Razorpay payment IDs strictly requiring 'pay_' prefix", () => {
+        expect(isValidRazorpayPaymentId("pay_12345678")).toBe(true);
+        expect(isValidRazorpayPaymentId("pay_ABC12345xyz")).toBe(true);
+        expect(isValidRazorpayPaymentId("pay_c1")).toBe(false); // under 3 suffix chars
+        expect(isValidRazorpayPaymentId("order_12345678")).toBe(false);
+        expect(isValidRazorpayPaymentId("pay_")).toBe(false);
+        expect(isValidRazorpayPaymentId(" pay_12345678 ")).toBe(false);
+        expect(isValidRazorpayPaymentId("")).toBe(false);
+        expect(isValidRazorpayPaymentId(null)).toBe(false);
+        expect(isValidRazorpayPaymentId({})).toBe(false);
+      });
+
+      it("validates signatures strictly as 64 hexadecimal characters", () => {
+        const validHex = "a".repeat(64);
+        expect(isValidRazorpaySignature(validHex)).toBe(true);
+        expect(isValidRazorpaySignature("1234567890abcdef".repeat(4))).toBe(true);
+        expect(isValidRazorpaySignature("a".repeat(63))).toBe(false); // too short
+        expect(isValidRazorpaySignature("a".repeat(65))).toBe(false); // too long
+        expect(isValidRazorpaySignature("g".repeat(64))).toBe(false); // non-hex
+        expect(isValidRazorpaySignature(" " + validHex)).toBe(false); // leading space
+        expect(isValidRazorpaySignature(null)).toBe(false);
+        expect(isValidRazorpaySignature(123)).toBe(false);
+      });
+
+      it("validates receipts safely", () => {
+        expect(isValidReceipt("rcpt_12345")).toBe(true);
+        expect(isValidReceipt("receipt-valid_123")).toBe(true);
+        expect(isValidReceipt("a".repeat(40))).toBe(true);
+        expect(isValidReceipt("a".repeat(41))).toBe(false); // exceeds 40 chars
+        expect(isValidReceipt("receipt with spaces")).toBe(false);
+        expect(isValidReceipt("receipt$special")).toBe(false);
+        expect(isValidReceipt("")).toBe(false);
+        expect(isValidReceipt(null)).toBe(false);
+        expect(isValidReceipt(12345)).toBe(false);
+      });
+
+      it("validates notes rejecting primitives, arrays, and nested structures", () => {
+        expect(validateRazorpayNotes(undefined).isValid).toBe(true);
+        expect(validateRazorpayNotes(null).isValid).toBe(true);
+        expect(validateRazorpayNotes({}).isValid).toBe(true);
+        expect(validateRazorpayNotes({ destination: "Kyoto", guestCount: 2 }).isValid).toBe(true);
+        expect(validateRazorpayNotes("string").isValid).toBe(false);
+        expect(validateRazorpayNotes([1, 2, 3]).isValid).toBe(false);
+        expect(validateRazorpayNotes(123).isValid).toBe(false);
+        expect(validateRazorpayNotes({ nested: { a: 1 } }).isValid).toBe(false);
+        expect(validateRazorpayNotes({ arr: ["val"] }).isValid).toBe(false);
+
+        // Max 15 key-value pairs
+        const sixteenKeys: Record<string, string> = {};
+        for (let i = 0; i < 16; i++) sixteenKeys[`key_${i}`] = `val_${i}`;
+        expect(validateRazorpayNotes(sixteenKeys).isValid).toBe(false);
+
+        // Key length > 40
+        expect(validateRazorpayNotes({ ["k".repeat(41)]: "val" }).isValid).toBe(false);
+
+        // Value length > 255
+        expect(validateRazorpayNotes({ key: "v".repeat(256) }).isValid).toBe(false);
+      });
+    });
+
+    describe("POST /api/razorpay/calculate-amount input validation", () => {
+      it("rejects non-string currency with HTTP 400 without crashing", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/calculate-amount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: 12345, // non-string
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Unsupported or invalid currency");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects invalid item structures (null items, non-object, missing activityId) with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          // null item inside array
+          const res1 = await fetch(`${server.url}/api/razorpay/calculate-amount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [null],
+              currency: "EUR",
+            }),
+          });
+          expect(res1.status).toBe(400);
+          const body1 = await res1.json();
+          expect(body1.error).toContain("must be a non-null object");
+
+          // missing activityId
+          const res2 = await fetch(`${server.url}/api/razorpay/calculate-amount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ quantity: 2 }],
+              currency: "EUR",
+            }),
+          });
+          expect(res2.status).toBe(400);
+          const body2 = await res2.json();
+          expect(body2.error).toContain("activityId must be a non-empty string");
+
+          // non-integer quantity
+          const res3 = await fetch(`${server.url}/api/razorpay/calculate-amount`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1.5 }],
+              currency: "EUR",
+            }),
+          });
+          expect(res3.status).toBe(400);
+          const body3 = await res3.json();
+          expect(body3.error).toContain("must be an integer between 1 and 50");
+        } finally {
+          await server.close();
+        }
+      });
+    });
+
+    describe("POST /api/razorpay/create-order input validation", () => {
+      it("rejects invalid receipt format when supplied with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: "invalid receipt with spaces & symbols!",
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects non-object notes or nested notes with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              notes: "a string instead of object",
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Notes must be a plain object");
+        } finally {
+          await server.close();
+        }
+      });
+    });
+
+    describe("POST /api/razorpay/verify-payment input validation", () => {
+      it("rejects malformed order IDs missing 'order_' prefix with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: "invalid_order_prefix_12345",
+              razorpay_payment_id: "pay_valid12345",
+              razorpay_signature: "a".repeat(64),
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.verified).toBe(false);
+          expect(body.error).toContain("Invalid razorpay_order_id");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects malformed payment IDs missing 'pay_' prefix with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: "order_valid12345",
+              razorpay_payment_id: "invalid_payment_prefix_12345",
+              razorpay_signature: "a".repeat(64),
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.verified).toBe(false);
+          expect(body.error).toContain("Invalid razorpay_payment_id");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects malformed signatures not matching 64 hex characters with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_order_id: "order_valid12345",
+              razorpay_payment_id: "pay_valid12345",
+              razorpay_signature: "not_a_valid_64_hex_signature",
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.verified).toBe(false);
+          expect(body.error).toContain("Invalid razorpay_signature");
+        } finally {
+          await server.close();
+        }
+      });
+    });
+
+    describe("POST /api/razorpay/record-failure input validation", () => {
+      it("rejects missing or invalid order ID prefix with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          // Missing orderId
+          const res1 = await fetch(`${server.url}/api/razorpay/record-failure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: "cancelled" }),
+          });
+          expect(res1.status).toBe(400);
+
+          // Invalid orderId format
+          const res2 = await fetch(`${server.url}/api/razorpay/record-failure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId: "bad_prefix_12345" }),
+          });
+          expect(res2.status).toBe(400);
+          const body2 = await res2.json();
+          expect(body2.error).toContain("Invalid or missing 'orderId'");
+        } finally {
+          await server.close();
+        }
+      });
     });
   });
 });

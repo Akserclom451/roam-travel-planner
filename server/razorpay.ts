@@ -71,6 +71,109 @@ export function getSubunitMultiplier(currency: string): number {
   return 100;
 }
 
+// ---------------------------------------------------------------------------
+// S3-03: Strict Input Validation Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates that currency is a string and matches one of the supported currencies.
+ * Does not call .trim() or string methods before verifying typeof === "string".
+ */
+export function isValidCurrency(currency: unknown): currency is SupportedPaymentCurrency {
+  if (typeof currency !== "string") {
+    return false;
+  }
+  const clean = currency.trim().toUpperCase();
+  return (SUPPORTED_PAYMENT_CURRENCIES as readonly string[]).includes(clean);
+}
+
+/**
+ * Validates Razorpay order ID: string starting with "order_", followed by 3 to 40 alphanumeric or underscore/hyphen chars.
+ * Does not silently trim or rewrite.
+ */
+export function isValidRazorpayOrderId(id: unknown): id is string {
+  if (typeof id !== "string") {
+    return false;
+  }
+  return /^order_[a-zA-Z0-9_\-]{3,40}$/.test(id);
+}
+
+/**
+ * Validates Razorpay payment ID: string starting with "pay_", followed by 3 to 40 alphanumeric or underscore/hyphen chars.
+ * Does not silently trim or rewrite.
+ */
+export function isValidRazorpayPaymentId(id: unknown): id is string {
+  if (typeof id !== "string") {
+    return false;
+  }
+  return /^pay_[a-zA-Z0-9_\-]{3,40}$/.test(id);
+}
+
+/**
+ * Validates Razorpay signature: exactly 64 hexadecimal characters.
+ * Does not silently trim or rewrite.
+ */
+export function isValidRazorpaySignature(signature: unknown): signature is string {
+  if (typeof signature !== "string") {
+    return false;
+  }
+  return /^[a-fA-F0-9]{64}$/.test(signature);
+}
+
+/**
+ * Validates optional receipt value.
+ * Per Razorpay docs: max 40 characters, alphanumeric and safe symbols (- _).
+ */
+export function isValidReceipt(receipt: unknown): receipt is string {
+  if (typeof receipt !== "string") {
+    return false;
+  }
+  return /^[a-zA-Z0-9_\-]{1,40}$/.test(receipt);
+}
+
+/**
+ * Validates notes as a plain object.
+ * Rejects arrays, null, primitives, and nested objects.
+ * Enforces Razorpay documented limits: max 15 key-value pairs, string keys <= 40 chars, string/number values <= 255 chars.
+ */
+export function validateRazorpayNotes(notes: unknown): { isValid: boolean; error?: string } {
+  if (notes === undefined || notes === null) {
+    return { isValid: true };
+  }
+  if (typeof notes !== "object" || Array.isArray(notes)) {
+    return { isValid: false, error: "Notes must be a plain object." };
+  }
+  // Check prototype to ensure plain object
+  const proto = Object.getPrototypeOf(notes);
+  if (proto !== null && proto !== Object.prototype) {
+    return { isValid: false, error: "Notes must be a plain key-value object." };
+  }
+
+  const entries = Object.entries(notes);
+  if (entries.length > 15) {
+    return { isValid: false, error: "Notes object cannot exceed 15 key-value pairs." };
+  }
+
+  for (const [key, value] of entries) {
+    if (typeof key !== "string" || key.length === 0 || key.length > 40) {
+      return { isValid: false, error: `Invalid note key '${key}': must be a string up to 40 characters.` };
+    }
+    if (typeof value === "string") {
+      if (value.length > 255) {
+        return { isValid: false, error: `Note value for key '${key}' exceeds maximum length of 255 characters.` };
+      }
+    } else if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        return { isValid: false, error: `Note value for key '${key}' must be a finite number.` };
+      }
+    } else {
+      return { isValid: false, error: `Invalid note value for key '${key}': must be a string or number, nested objects or arrays are not permitted.` };
+    }
+  }
+
+  return { isValid: true };
+}
+
 /**
  * Converts a major unit amount (e.g. 42 EUR or 7400 JPY) to Razorpay minor subunits.
  */
@@ -264,16 +367,30 @@ export async function calculateServerOrderAmount(
   ratesOverride?: Record<string, number>
 ): Promise<AuthoritativeOrderCalculation> {
   const { amount, currency, items } = input;
-  const cleanCurrency = (currency || "").trim().toUpperCase() as SupportedPaymentCurrency;
 
-  if (!cleanCurrency || !SUPPORTED_PAYMENT_CURRENCIES.includes(cleanCurrency)) {
+  if (!isValidCurrency(currency)) {
     throw new Error(
-      `Unsupported or invalid currency: '${currency}'. ROAM strictly supports EUR, JPY, ISK, and INR.`
+      `Unsupported or invalid currency: '${String(currency)}'. ROAM strictly supports EUR, JPY, ISK, and INR.`
     );
   }
 
+  const cleanCurrency = currency.trim().toUpperCase() as SupportedPaymentCurrency;
+
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Cannot calculate order amount: itinerary items array is required and must not be empty.");
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Invalid itinerary item at index ${i}: item must be a non-null object.`);
+    }
+    if (typeof item.activityId !== "string" || item.activityId.trim() === "") {
+      throw new Error(`Invalid itinerary item at index ${i}: activityId must be a non-empty string.`);
+    }
+    if (!Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 50) {
+      throw new Error(`Invalid item quantity for ${item.activityId}: must be an integer between 1 and 50.`);
+    }
   }
 
   // Obtain authoritative conversion rate
@@ -348,6 +465,10 @@ export function verifyRazorpaySignature(
   keySecret: string
 ): boolean {
   if (!orderId || !paymentId || !signature || !keySecret) {
+    return false;
+  }
+
+  if (!isValidRazorpaySignature(signature)) {
     return false;
   }
 
@@ -607,6 +728,25 @@ export function createRazorpayRouter(options?: {
     try {
       const { amount, currency, receipt, notes, items } = req.body;
 
+      // Validate optional receipt: if provided, must be valid; reject invalid with HTTP 400
+      if (receipt !== undefined && receipt !== null && receipt !== "") {
+        if (!isValidReceipt(receipt)) {
+          res.status(400).json({
+            error: "Invalid receipt format: receipt must be an alphanumeric string up to 40 characters (hyphens and underscores allowed).",
+          });
+          return;
+        }
+      }
+
+      // Validate optional notes: if provided, must be a plain object within Razorpay constraints
+      const notesValidation = validateRazorpayNotes(notes);
+      if (!notesValidation.isValid) {
+        res.status(400).json({
+          error: notesValidation.error || "Invalid notes payload.",
+        });
+        return;
+      }
+
       // Authoritative server calculation (client amount is ignored)
       const calculation = await calculateServerOrderAmount({
         amount,
@@ -629,7 +769,7 @@ export function createRazorpayRouter(options?: {
             displayAmount: calculation.amount,
             currency: cleanCurrency,
             formattedAmount,
-            receipt: receipt || `roam_test_${Date.now()}`,
+            receipt: (receipt && typeof receipt === "string") ? receipt : `roam_test_${Date.now()}`,
           },
         });
         return;
@@ -642,7 +782,9 @@ export function createRazorpayRouter(options?: {
           key_secret: credentials.keySecret,
         });
 
-      const orderReceipt = receipt || `roam_rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      const orderReceipt = (receipt && typeof receipt === "string")
+        ? receipt
+        : `roam_rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
       // Create order with Razorpay test API
       const razorpayOrder = await razorpay.orders.create({
@@ -701,6 +843,31 @@ export function createRazorpayRouter(options?: {
       if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
         res.status(400).json({
           error: "Missing payment verification parameters (order_id, payment_id, or signature).",
+          verified: false,
+        });
+        return;
+      }
+
+      // S3-03: Validate identifiers and signature format separately without trimming
+      if (!isValidRazorpayOrderId(razorpay_order_id)) {
+        res.status(400).json({
+          error: "Invalid razorpay_order_id: must be a valid Razorpay order identifier starting with 'order_'.",
+          verified: false,
+        });
+        return;
+      }
+
+      if (!isValidRazorpayPaymentId(razorpay_payment_id)) {
+        res.status(400).json({
+          error: "Invalid razorpay_payment_id: must be a valid Razorpay payment identifier starting with 'pay_'.",
+          verified: false,
+        });
+        return;
+      }
+
+      if (!isValidRazorpaySignature(razorpay_signature)) {
+        res.status(400).json({
+          error: "Invalid razorpay_signature: signature must be a 64-character hexadecimal string.",
           verified: false,
         });
         return;
@@ -889,8 +1056,8 @@ export function createRazorpayRouter(options?: {
   router.post("/record-failure", (req: Request, res: Response) => {
     const { orderId, reason, type } = req.body;
 
-    if (!orderId || typeof orderId !== "string") {
-      res.status(400).json({ error: "Missing required 'orderId' parameter." });
+    if (!orderId || typeof orderId !== "string" || !isValidRazorpayOrderId(orderId)) {
+      res.status(400).json({ error: "Invalid or missing 'orderId' parameter: must be a valid Razorpay order identifier starting with 'order_'." });
       return;
     }
 
