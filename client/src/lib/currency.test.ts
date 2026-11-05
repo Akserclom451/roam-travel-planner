@@ -17,21 +17,21 @@ import {
 
 describe("ROAM Currency & Pricing Logic", () => {
   const mockLiveRatesState: RatesState = {
-    rates: { EUR: 1, JPY: 176.18, ISK: 136.54 },
+    rates: { EUR: 1, JPY: 176.18, ISK: 136.54, INR: 106.18 },
     date: "2026-10-26",
     status: "live",
     lastUpdated: 1700000000000,
   };
 
   const mockFallbackRatesState: RatesState = {
-    rates: { EUR: 1, JPY: 1, ISK: 1 },
+    rates: { EUR: 1, JPY: 1, ISK: 1, INR: 1 },
     date: null,
     status: "fallback",
     lastUpdated: null,
   };
 
   const mockStaleRatesState: RatesState = {
-    rates: { EUR: 1, JPY: 170.5, ISK: 135.0 },
+    rates: { EUR: 1, JPY: 170.5, ISK: 135.0, INR: 104.5 },
     date: "2026-10-20",
     status: "stale",
     lastUpdated: 1699000000000,
@@ -54,10 +54,16 @@ describe("ROAM Currency & Pricing Logic", () => {
       expect(formatted.replace(/\u00a0/g, " ")).toBe("kr 5,735");
     });
 
-    it("formats standardized currency strings: JPY as ¥7,398, EUR as €42, and ISK as kr 11,742", () => {
+    it("formats INR with ₹ symbol and commas", () => {
+      expect(formatCurrency(3180, "INR")).toBe("₹3,180");
+      expect(formatCurrency(2650, "INR")).toBe("₹2,650");
+    });
+
+    it("formats standardized currency strings: JPY as ¥7,398, EUR as €42, ISK as kr 11,742, and INR as ₹3,180", () => {
       expect(formatCurrency(11742, "ISK")).toBe("kr 11,742");
       expect(formatCurrency(7398, "JPY")).toBe("¥7,398");
       expect(formatCurrency(42, "EUR")).toBe("€42");
+      expect(formatCurrency(3180, "INR")).toBe("₹3,180");
     });
 
     it("converts base EUR amounts accurately into selected currencies", () => {
@@ -76,6 +82,11 @@ describe("ROAM Currency & Pricing Logic", () => {
       // 42 * 136.54 = 5734.68 -> rounded to 5735
       expect(iskResult.formatted.replace(/\u00a0/g, " ")).toBe("kr 5,735");
       expect(iskResult.effectiveCurrency).toBe("ISK");
+
+      const inrResult = formatEurPrice(30, "INR", mockLiveRatesState);
+      // 30 * 106.18 = 3185.4 -> rounded to 3185
+      expect(inrResult.formatted).toBe("₹3,185");
+      expect(inrResult.effectiveCurrency).toBe("INR");
     });
   });
 
@@ -84,12 +95,14 @@ describe("ROAM Currency & Pricing Logic", () => {
       const sampleV2 = [
         { date: "2026-10-26", base: "EUR", quote: "ISK", rate: 136.54 },
         { date: "2026-10-26", base: "EUR", quote: "JPY", rate: 176.18 },
+        { date: "2026-10-26", base: "EUR", quote: "INR", rate: 106.18 },
       ];
       const parsed = parseFrankfurterResponse(sampleV2);
       expect(parsed).not.toBeNull();
       expect(parsed?.rates.EUR).toBe(1);
       expect(parsed?.rates.JPY).toBe(176.18);
       expect(parsed?.rates.ISK).toBe(136.54);
+      expect(parsed?.rates.INR).toBe(106.18);
       expect(parsed?.date).toBe("2026-10-26");
     });
 
@@ -98,12 +111,13 @@ describe("ROAM Currency & Pricing Logic", () => {
         amount: 1,
         base: "EUR",
         date: "2026-10-26",
-        rates: { JPY: 176.18, ISK: 136.54 },
+        rates: { JPY: 176.18, ISK: 136.54, INR: 106.18 },
       };
       const parsed = parseFrankfurterResponse(sampleV1);
       expect(parsed).not.toBeNull();
       expect(parsed?.rates.JPY).toBe(176.18);
       expect(parsed?.rates.ISK).toBe(136.54);
+      expect(parsed?.rates.INR).toBe(106.18);
     });
 
     it("rejects invalid or corrupted responses", () => {

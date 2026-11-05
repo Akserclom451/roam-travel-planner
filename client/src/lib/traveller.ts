@@ -50,6 +50,7 @@ export function getDefaultCallingCode(destinationId: string): string {
   if (destinationId === "kyoto") return "+81";
   if (destinationId === "lisbon") return "+351";
   if (destinationId === "reykjavik") return "+354";
+  if (destinationId === "jaipur") return "+91";
   return "+1";
 }
 

@@ -28,6 +28,7 @@ describe("ROAM Checkout Step 2: Lead Traveller Logic", () => {
       expect(getDefaultCallingCode("kyoto")).toBe("+81");
       expect(getDefaultCallingCode("lisbon")).toBe("+351");
       expect(getDefaultCallingCode("reykjavik")).toBe("+354");
+      expect(getDefaultCallingCode("jaipur")).toBe("+91");
       expect(getDefaultCallingCode("unknown")).toBe("+1");
     });
   });

@@ -1571,7 +1571,39 @@ h1 em { color: #d85d43; font-style: italic; }
   line-height: 1.45;
 }
 
-/* Payment Method Selector */
+.payment-method-guidance {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 15px;
+  background: #f7faf7;
+  border: 1px solid #d4ded3;
+  border-left: 3px solid #24392c;
+  border-radius: 2px;
+  color: #24392c;
+  line-height: 1.45;
+}
+
+.payment-method-guidance .notice-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #24392c;
+}
+
+.payment-method-guidance strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1b2f21;
+  margin-bottom: 2px;
+}
+
+.payment-method-guidance p {
+  margin: 0;
+  font-size: 12px;
+  color: #495a4b;
+}
+
 .payment-method-selector-section {
   display: flex;
   flex-direction: column;

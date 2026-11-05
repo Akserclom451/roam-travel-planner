@@ -69,8 +69,9 @@ describe("ROAM Razorpay Server Logic", () => {
   });
 
   describe("Subunit Multiplier and Conversion", () => {
-    it("returns 100 for EUR", () => {
+    it("returns 100 for EUR and INR", () => {
       expect(getSubunitMultiplier("EUR")).toBe(100);
+      expect(getSubunitMultiplier("INR")).toBe(100);
     });
 
     it("returns 1 for zero-decimal currencies (JPY, ISK)", () => {
@@ -83,6 +84,7 @@ describe("ROAM Razorpay Server Logic", () => {
       expect(toSubunits(112, "EUR")).toBe(11200);
       expect(toSubunits(7400, "JPY")).toBe(7400); // zero-decimal
       expect(toSubunits(11700, "ISK")).toBe(11700); // zero-decimal
+      expect(toSubunits(3180, "INR")).toBe(318000); // 3180 INR -> 318000 paise
     });
 
     it("throws an error for non-positive or non-finite amounts", () => {
@@ -295,6 +297,28 @@ describe("ROAM Razorpay Server Logic", () => {
       ).rejects.toThrow("Invalid item quantity");
     });
 
+    it("authoritatively computes INR converted total for Jaipur activities with paise subunits", async () => {
+      // Rate 106.0
+      // jaipur-amber (30): Math.round(30 * 106.0) = 3180 INR -> 1 x 3180 = 3180
+      // jaipur-blockprint (25): Math.round(25 * 106.0) = 2650 INR -> 1 x 2650 = 2650
+      // Total: 3180 + 2650 = 5830 INR
+      const result = await calculateServerOrderAmount(
+        {
+          currency: "INR",
+          items: [
+            { activityId: "jaipur-amber", quantity: 1 },
+            { activityId: "jaipur-blockprint", quantity: 1 },
+          ],
+        },
+        { INR: 106.0 }
+      );
+      expect(result.amount).toBe(5830);
+      expect(result.amountInSubunits).toBe(583000); // 5830 * 100 paise
+      expect(result.totalCostEur).toBe(55);
+      expect(result.currency).toBe("INR");
+      expect(formatServerCurrency(result.amount, result.currency)).toBe("₹5,830");
+    });
+
     it("strictly rejects unsupported currencies", async () => {
       await expect(
         calculateServerOrderAmount({
@@ -305,7 +329,7 @@ describe("ROAM Razorpay Server Logic", () => {
 
       await expect(
         calculateServerOrderAmount({
-          currency: "INR",
+          currency: "GBP",
           items: [{ activityId: "kyoto-tea", quantity: 1 }],
         })
       ).rejects.toThrow("Unsupported or invalid currency");

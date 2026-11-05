@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  Building2,
   Calendar,
   CalendarDays,
   Check,
@@ -30,7 +29,6 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Smartphone,
   Sparkles,
   Trash2,
   User,
@@ -70,7 +68,6 @@ import {
   sanitizeLeadTravellerForm,
 } from "@/lib/traveller";
 import {
-  type PaymentMethodType,
   type PaymentFlowStatus,
   type RazorpayConfigResponse,
   type CreateOrderResponse,
@@ -85,7 +82,7 @@ import {
   buildRazorpayCheckoutOptions,
 } from "@/lib/razorpay";
 
-type DestinationId = "kyoto" | "lisbon" | "reykjavik";
+type DestinationId = "kyoto" | "lisbon" | "reykjavik" | "jaipur";
 type DayId = "Day 1" | "Day 2" | "Day 3";
 type Category = "All" | "Culture" | "Food" | "Outdoors" | "Slow travel";
 type PriceFilter = "All" | "under30" | "30to70" | "over70";
@@ -105,11 +102,11 @@ type SavedPlan = {
 };
 
 function normalizeSavedPlan(plan: SavedPlan): SavedPlan {
-  if (plan.budgetCurrency && (plan.budgetCurrency === "EUR" || plan.budgetCurrency === "JPY" || plan.budgetCurrency === "ISK")) {
+  if (plan.budgetCurrency && (plan.budgetCurrency === "EUR" || plan.budgetCurrency === "JPY" || plan.budgetCurrency === "ISK" || plan.budgetCurrency === "INR")) {
     return plan;
   }
   const defaultCurrency: CurrencyCode =
-    plan.destinationId === "kyoto" ? "JPY" : plan.destinationId === "reykjavik" ? "ISK" : "EUR";
+    plan.destinationId === "kyoto" ? "JPY" : plan.destinationId === "reykjavik" ? "ISK" : plan.destinationId === "jaipur" ? "INR" : "EUR";
   return {
     ...plan,
     budgetCurrency: defaultCurrency,
@@ -179,6 +176,15 @@ const destinations: Destination[] = [
     image: "https://images.unsplash.com/photo-1504893524553-b855bce32c67?auto=format&fit=crop&w=1200&q=86",
     note: "Wide skies, warm pools, and wild edges.",
     currency: { code: "ISK", symbol: "kr" },
+  },
+  {
+    id: "jaipur",
+    name: "Jaipur",
+    country: "India",
+    days: "3 days",
+    image: "https://images.unsplash.com/photo-1599661046289-e31897846e41?auto=format&fit=crop&w=1200&q=86",
+    note: "Pink sandstone palaces, block printing, and spiced chai.",
+    currency: { code: "INR", symbol: "₹" },
   },
 ];
 
@@ -384,6 +390,73 @@ const activityData: Record<DestinationId, Activity[]> = {
       accent: "#ba8e54",
     },
   ],
+  jaipur: [
+    {
+      id: "jaipur-amber",
+      name: "Amber Fort at sunrise",
+      category: "Outdoors",
+      description: "Walk the Maota Lake ramparts before the desert heat settles in.",
+      details:
+        "Meet your local heritage guide at first light to explore Amber's Rajput architecture, mirror-inlaid Sheesh Mahal, and sweeping views across the Aravalli hills before visitor crowds arrive.",
+      duration: "3 hr",
+      price: 30,
+      location: "Amer, Jaipur",
+      image: "https://images.unsplash.com/photo-1599661046289-e31897846e41?auto=format&fit=crop&w=900&q=86",
+      accent: "#d85d43",
+    },
+    {
+      id: "jaipur-blockprint",
+      name: "Bagru natural block printing",
+      category: "Culture",
+      description: "Carve patterns and press natural indigo into hand-loomed cotton.",
+      details:
+        "Spend a morning in a master artisan's studio learning Chippa woodblock printing techniques, mud-resist dye baths, and vegetable dyes. Print your own scarf or fabric square to keep.",
+      duration: "2 hr 30 min",
+      price: 25,
+      location: "Bagru, Jaipur",
+      image: "https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=900&q=86",
+      accent: "#4c7983",
+    },
+    {
+      id: "jaipur-bazaar",
+      name: "Old City street food & spice walk",
+      category: "Food",
+      description: "Kachoris, spiced lassi, and sweet ghewar through Johari Bazaar.",
+      details:
+        "Follow a food historian through the pink colonnades of the Walled City. Sample crisp pyaz kachoris, clay-cup lassi, and seasonal sweets from multi-generational family stalls.",
+      duration: "2 hr",
+      price: 18,
+      location: "Johari Bazaar, Jaipur",
+      image: "https://images.unsplash.com/photo-1567157577867-05ccb1388e66?auto=format&fit=crop&w=900&q=86",
+      accent: "#c89438",
+    },
+    {
+      id: "jaipur-hawa",
+      name: "Hawa Mahal & rooftop chai",
+      category: "Slow travel",
+      description: "Morning light through honeycomb jharokhas with quiet courtyard tea.",
+      details:
+        "Step inside the Palace of Winds to understand how breeze circulation cooled the royal chambers. Finish on a quiet heritage terrace facing the facade with fresh cardamom chai.",
+      duration: "1 hr 45 min",
+      price: 14,
+      location: "Badi Chaupar, Jaipur",
+      image: "https://images.unsplash.com/photo-1603262110263-fb010d6e59d4?auto=format&fit=crop&w=900&q=86",
+      accent: "#a14d35",
+    },
+    {
+      id: "jaipur-observatory",
+      name: "Jantar Mantar astronomy walk",
+      category: "Culture",
+      description: "Decode giant stone sundials and celestial calculation instruments.",
+      details:
+        "Explore the world's largest stone sundial with an astronomical guide. Discover how Maharaja Sawai Jai Singh II engineered precision instruments that still tell exact local solar time.",
+      duration: "2 hr",
+      price: 20,
+      location: "City Palace Complex, Jaipur",
+      image: "https://images.unsplash.com/photo-1609137144813-7d9921338f24?auto=format&fit=crop&w=900&q=86",
+      accent: "#5c786c",
+    },
+  ],
 };
 
 const activitySchedules: Record<string, ActivitySchedule> = {
@@ -402,6 +475,11 @@ const activitySchedules: Record<string, ActivitySchedule> = {
   "reykjavik-coast": { startMinutes: 10 * 60, durationMinutes: 210, label: "10:00" },
   "reykjavik-northern": { startMinutes: 21 * 60, durationMinutes: 240, label: "21:00" },
   "reykjavik-design": { startMinutes: 13 * 60, durationMinutes: 120, label: "13:00" },
+  "jaipur-amber": { startMinutes: 7 * 60, durationMinutes: 180, label: "07:00" },
+  "jaipur-blockprint": { startMinutes: 10 * 60 + 30, durationMinutes: 150, label: "10:30" },
+  "jaipur-bazaar": { startMinutes: 17 * 60, durationMinutes: 120, label: "17:00" },
+  "jaipur-hawa": { startMinutes: 8 * 60 + 30, durationMinutes: 105, label: "08:30" },
+  "jaipur-observatory": { startMinutes: 14 * 60, durationMinutes: 120, label: "14:00" },
 };
 
 function getSchedule(activity: Activity): ActivitySchedule {
@@ -463,13 +541,11 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [draggingActivityId, setDraggingActivityId] = useState<string | null>(null);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>("card");
   const [paymentStatus, setPaymentStatus] = useState<PaymentFlowStatus>("idle");
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentResult, setPaymentResult] = useState<VerifyPaymentResponse | null>(null);
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfigResponse | null>(null);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [unconfiguredPayloadPreview, setUnconfiguredPayloadPreview] = useState<CreateOrderResponse | Record<string, unknown> | null>(null);
   const [authoritativePaymentAmount, setAuthoritativePaymentAmount] = useState<AuthoritativeAmountResponse | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -604,13 +680,6 @@ export default function Home() {
   };
 
 
-  const copyToClipboard = (text: string, fieldId: string) => {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text);
-      setCopiedField(fieldId);
-      setTimeout(() => setCopiedField(null), 2000);
-    }
-  };
 
   useEffect(() => {
     if (checkoutStep === "payment") {
@@ -716,7 +785,6 @@ export default function Home() {
           leadTraveller: travellerForm.fullName.trim(),
           email: travellerForm.email.trim(),
           phone: formatDisplayPhone(travellerForm.countryCode, travellerForm.phone),
-          preferred_method: paymentMethod,
         },
       });
 
@@ -743,7 +811,6 @@ export default function Home() {
         fullName: travellerForm.fullName,
         email: travellerForm.email,
         contact: formatRazorpayContact(travellerForm.countryCode, travellerForm.phone),
-        paymentMethod,
         partySize,
         onDismiss: async () => {
           setPaymentStatus("cancelled");
@@ -1392,7 +1459,7 @@ export default function Home() {
 
             <div className={`filters-panel ${showFilters ? "open" : ""}`}>
               <div className="filter-group">
-                <div className="filter-label"><Filter size={13} /> Type <small>Choose one or more</small></div>
+                <div className="filter-label"><Filter size={13} /> Type</div>
                 <div className="filter-options">{categories.map((item) => <button key={item} className={(item === "All" ? selectedCategories.length === 0 : selectedCategories.includes(item)) ? "active" : ""} onClick={() => toggleCategory(item)}>{item}{item !== "All" && selectedCategories.includes(item) && <Check size={12} />}</button>)}</div>
               </div>
               <div className="filter-group">
@@ -1790,9 +1857,6 @@ export default function Home() {
                       <span>in booking party</span>
                     </div>
                   </div>
-                  <p className="traveller-summary-note">
-                    The primary contact associated with this itinerary.
-                  </p>
                 </div>
 
                 <form
@@ -1805,9 +1869,6 @@ export default function Home() {
                 >
                   <div className="traveller-form-section">
                     <h3 className="traveller-form-title">Lead traveller contact details</h3>
-                    <p className="traveller-form-subtitle">
-                      Enter contact information for the primary adult traveller in your group.
-                    </p>
 
                     <div className={`form-group ${travellerTouched.fullName && travellerErrors.fullName ? "has-error" : ""}`}>
                       <label htmlFor="traveller-fullName">
@@ -1998,13 +2059,13 @@ export default function Home() {
                         <strong className="receipt-value text-emphasis">
                           {paymentResult?.formattedAmount ||
                             (paymentResult?.amount !== undefined && paymentResult?.currency
-                              ? `${paymentResult.currency === "JPY" ? "¥" : paymentResult.currency === "ISK" ? "kr " : "€"}${paymentResult.amount.toLocaleString()}`
+                              ? `${paymentResult.currency === "JPY" ? "¥" : paymentResult.currency === "ISK" ? "kr " : paymentResult.currency === "INR" ? "₹" : "€"}${paymentResult.amount.toLocaleString()}`
                               : "—")}
                         </strong>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Payment Method</span>
-                        <span className="receipt-value uppercase">{paymentMethod}</span>
+                        <span className="receipt-value">Razorpay Standard</span>
                       </div>
                       <div className="receipt-row">
                         <span className="receipt-label">Lead Traveller</span>
@@ -2091,166 +2152,17 @@ export default function Home() {
                       </div>
                     )}
 
-                    {/* Payment Method Selector */}
-                    <div className="payment-method-selector-section">
-                      <label className="payment-methods-label">Select Test Payment Method</label>
-                      <div className="payment-methods-grid" role="radiogroup" aria-label="Payment method">
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={paymentMethod === "card"}
-                          className={`payment-method-card ${paymentMethod === "card" ? "selected" : ""}`}
-                          onClick={() => setPaymentMethod("card")}
-                        >
-                          <CreditCard size={18} />
-                          <span>Card</span>
-                          <span className="method-currency-tag supported">Active ({displayCurrency})</span>
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={paymentMethod === "upi"}
-                          className={`payment-method-card ${paymentMethod === "upi" ? "selected" : ""}`}
-                          onClick={() => setPaymentMethod("upi")}
-                        >
-                          <Smartphone size={18} />
-                          <span>UPI / QR</span>
-                          <span className="method-currency-tag inr-only">INR Only</span>
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={paymentMethod === "netbanking"}
-                          className={`payment-method-card ${paymentMethod === "netbanking" ? "selected" : ""}`}
-                          onClick={() => setPaymentMethod("netbanking")}
-                        >
-                          <Building2 size={18} />
-                          <span>NetBanking</span>
-                          <span className="method-currency-tag inr-only">INR Only</span>
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={paymentMethod === "wallet"}
-                          className={`payment-method-card ${paymentMethod === "wallet" ? "selected" : ""}`}
-                          onClick={() => setPaymentMethod("wallet")}
-                        >
-                          <Wallet size={18} />
-                          <span>Wallets</span>
-                          <span className="method-currency-tag inr-only">INR Only</span>
-                        </button>
-                      </div>
-
-                      {/* Informative Gateway Notice for Currency Incompatibilities */}
-                      {paymentMethod !== "card" && (
-                        <div className="gateway-currency-notice" role="note">
-                          <Info size={15} className="notice-icon" />
-                          <span>
-                            This itinerary uses {displayCurrency}. Some domestic payment options may not be available for this currency. Available methods will be shown by Razorpay at checkout.
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Test Credentials Helper Box */}
-                    <div className="sandbox-credentials-helper">
-                      <div className="credentials-header">
-                        <Sparkles size={14} />
-                        <span>Razorpay Sandbox Test Credentials (Reference Only)</span>
-                      </div>
-                      <div className="credentials-body">
-                        {paymentMethod === "card" && (
-                          <div className="credentials-detail">
-                            <div className="credential-field">
-                              <span className="field-name">Test Card Number</span>
-                              <div className="credential-copy-group">
-                                <code className="credential-code">4111 1111 1111 1111</code>
-                                <button
-                                  type="button"
-                                  className="credential-copy-btn"
-                                  onClick={() => copyToClipboard("4111 1111 1111 1111", "card")}
-                                  aria-label="Copy test card number"
-                                >
-                                  {copiedField === "card" ? <CheckCheck size={14} className="copied" /> : <Copy size={14} />}
-                                  <span>{copiedField === "card" ? "Copied" : "Copy"}</span>
-                                </button>
-                              </div>
-                            </div>
-                            <div className="credential-field-inline">
-                              <div>
-                                <span className="field-name">Expiry</span>
-                                <code>12/28</code>
-                              </div>
-                              <div>
-                                <span className="field-name">CVV</span>
-                                <code>123</code>
-                              </div>
-                              <div>
-                                <span className="field-name">Test OTP</span>
-                                <code>123456</code>
-                              </div>
-                            </div>
-                            <div className="credential-scenarios-note">
-                              <p className="credential-hint">
-                                <strong>Test Scenarios:</strong> Enter <code>123456</code> or click "Skip OTP" for instant authorization. To simulate a bank decline, click "Cancel" or "Fail" in the OTP modal.
-                              </p>
-                              <p className="credential-regulatory-note">
-                                <strong>International & RBI Notice:</strong> Razorpay processes international JPY in zero-decimal units (integer Yen). Razorpay's checkout modal automatically renders Reserve Bank of India (RBI) card tokenization guidelines for card transactions; ROAM uses standard parameters.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        {paymentMethod === "upi" && (
-                          <div className="credentials-detail">
-                            <div className="credential-field">
-                              <span className="field-name">Test UPI ID (VPA)</span>
-                              <div className="credential-copy-group">
-                                <code className="credential-code">success@razorpay</code>
-                                <button
-                                  type="button"
-                                  className="credential-copy-btn"
-                                  onClick={() => copyToClipboard("success@razorpay", "upi")}
-                                  aria-label="Copy test UPI ID"
-                                >
-                                  {copiedField === "upi" ? <CheckCheck size={14} className="copied" /> : <Copy size={14} />}
-                                  <span>{copiedField === "upi" ? "Copied" : "Copy"}</span>
-                                </button>
-                              </div>
-                            </div>
-                            <p className="credential-hint">
-                              Simulates instant test authorization. To simulate bank failure, enter <code>failure@razorpay</code>.
-                            </p>
-                            <p className="credential-regulatory-note">
-                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes UPI in the checkout sequence. However, because UPI is strictly an INR-denominated domestic network, the Razorpay drawer presents Card entry for {displayCurrency} transactions.
-                            </p>
-                          </div>
-                        )}
-
-                        {paymentMethod === "netbanking" && (
-                          <div className="credentials-detail">
-                            <p className="credential-hint">
-                              Inside Razorpay modal, select any test bank (SBI, HDFC, ICICI, etc.). On the bank redirect page, click <strong>Success</strong> to approve the test transaction, or <strong>Failure</strong> to test rejection.
-                            </p>
-                            <p className="credential-regulatory-note">
-                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes NetBanking in the checkout sequence. Indian NetBanking operates on domestic INR clearing rails; international currency transactions automatically present Card entry in Razorpay's hosted drawer.
-                            </p>
-                          </div>
-                        )}
-
-                        {paymentMethod === "wallet" && (
-                          <div className="credentials-detail">
-                            <p className="credential-hint">
-                              Choose any test wallet balance inside the Razorpay modal. Mock balance will be authorized automatically in sandbox mode.
-                            </p>
-                            <p className="credential-regulatory-note">
-                              <strong>Razorpay Sandbox Gateway Note:</strong> ROAM prioritizes Wallets in the checkout sequence. Domestic Indian wallets operate in INR; Razorpay presents Card entry for {displayCurrency} transactions.
-                            </p>
-                          </div>
-                        )}
-
+                    {/* Payment Method Selection Notice */}
+                    <div className="payment-method-guidance" role="note">
+                      <CreditCard size={18} className="notice-icon" />
+                      <div>
+                        <strong>Choose Payment Method in Razorpay</strong>
+                        <p>
+                          Payment methods are managed securely by Razorpay. Choose your preferred payment option (such as card or netbanking) directly inside the checkout window.
+                        </p>
                       </div>
                     </div>
+
 
 
                     {/* Order Recap Card */}

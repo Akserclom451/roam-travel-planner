@@ -1,4 +1,3 @@
-export type PaymentMethodType = "card" | "upi" | "netbanking" | "wallet";
 
 export type PaymentFlowStatus =
   | "idle"
@@ -221,7 +220,6 @@ export interface BuildCheckoutOptionsParams {
   fullName: string;
   email: string;
   contact: string;
-  paymentMethod: PaymentMethodType;
   partySize: number;
   onDismiss: () => void;
   handler: (response: {
@@ -232,16 +230,11 @@ export interface BuildCheckoutOptionsParams {
 }
 
 /**
- * Builds Razorpay Standard Checkout options with official payment method prefill
- * and display sequence preferences.
+ * Builds Razorpay Standard Checkout options.
+ * Lets Razorpay Standard Checkout present the available payment methods
+ * enabled on the merchant account.
  */
 export function buildRazorpayCheckoutOptions(params: BuildCheckoutOptionsParams) {
-  const allMethods: PaymentMethodType[] = ["card", "upi", "netbanking", "wallet"];
-  const displaySequence = [
-    params.paymentMethod,
-    ...allMethods.filter((m) => m !== params.paymentMethod),
-  ];
-
   return {
     key: params.keyId,
     amount: params.amount,
@@ -254,18 +247,9 @@ export function buildRazorpayCheckoutOptions(params: BuildCheckoutOptionsParams)
       email: params.email.trim(),
       contact: params.contact,
     },
-    config: {
-      display: {
-        sequence: displaySequence,
-        preferences: {
-          show_default_blocks: true,
-        },
-      },
-    },
     notes: {
       destination: params.destinationName,
       traveller_count: params.partySize.toString(),
-      preferred_method: params.paymentMethod,
     },
     theme: {
       color: "#253b2c",

@@ -23,7 +23,7 @@ export interface StoredOrder {
   notes?: Record<string, string | number>;
 }
 
-export const SUPPORTED_PAYMENT_CURRENCIES = ["EUR", "JPY", "ISK"] as const;
+export const SUPPORTED_PAYMENT_CURRENCIES = ["EUR", "JPY", "ISK", "INR"] as const;
 export type SupportedPaymentCurrency = (typeof SUPPORTED_PAYMENT_CURRENCIES)[number];
 
 export const ZERO_DECIMAL_CURRENCIES = ["JPY", "ISK"];
@@ -51,6 +51,12 @@ export const ACTIVITY_BASE_PRICES_EUR: Record<string, number> = {
   "reykjavik-coast": 58,
   "reykjavik-northern": 79,
   "reykjavik-design": 32,
+  // Jaipur
+  "jaipur-amber": 30,
+  "jaipur-blockprint": 25,
+  "jaipur-bazaar": 18,
+  "jaipur-hawa": 14,
+  "jaipur-observatory": 20,
 };
 
 /**
@@ -100,6 +106,9 @@ export function formatServerCurrency(amount: number, currency: string): string {
   if (cleanCurrency === "ISK") {
     return `${prefix}kr ${formattedAbs}`;
   }
+  if (cleanCurrency === "INR") {
+    return `${prefix}₹${formattedAbs}`;
+  }
   return `${prefix}${cleanCurrency} ${formattedAbs}`;
 }
 
@@ -128,6 +137,7 @@ export function setMockExchangeRates(
       EUR: 1,
       JPY: rates.JPY ?? 176.19,
       ISK: rates.ISK ?? 136.03,
+      INR: rates.INR ?? 105.92,
     },
     date,
     fetchedAt: Date.now(),
@@ -150,8 +160,8 @@ export async function fetchServerExchangeRates(timeoutMs = 6000): Promise<{
     return { rates: serverRatesCache.rates, date: serverRatesCache.date };
   }
 
-  const v2Url = "https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY,ISK";
-  const v1Url = "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=JPY,ISK";
+  const v2Url = "https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY,ISK,INR";
+  const v1Url = "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=JPY,ISK,INR";
 
   let fetchedData: any = null;
 
@@ -192,24 +202,26 @@ export async function fetchServerExchangeRates(timeoutMs = 6000): Promise<{
   }
 
   if (Array.isArray(fetchedData)) {
-    const rates: Record<SupportedPaymentCurrency, number> = { EUR: 1, JPY: 0, ISK: 0 };
+    const rates: Record<SupportedPaymentCurrency, number> = { EUR: 1, JPY: 0, ISK: 0, INR: 0 };
     let dateStr = "";
     for (const item of fetchedData) {
       if (item && typeof item === "object") {
         if (item.quote === "JPY" && typeof item.rate === "number" && item.rate > 0) rates.JPY = item.rate;
         if (item.quote === "ISK" && typeof item.rate === "number" && item.rate > 0) rates.ISK = item.rate;
+        if (item.quote === "INR" && typeof item.rate === "number" && item.rate > 0) rates.INR = item.rate;
         if (item.date && !dateStr) dateStr = item.date;
       }
     }
-    if (rates.JPY > 0 && rates.ISK > 0 && dateStr) {
+    if (rates.JPY > 0 && rates.ISK > 0 && rates.INR > 0 && dateStr) {
       serverRatesCache = { rates, date: dateStr, fetchedAt: Date.now() };
       return { rates, date: dateStr };
     }
   } else if (fetchedData && typeof fetchedData === "object" && fetchedData.rates) {
     const jpy = Number(fetchedData.rates.JPY);
     const isk = Number(fetchedData.rates.ISK);
-    if (jpy > 0 && isk > 0 && fetchedData.date) {
-      const rates: Record<SupportedPaymentCurrency, number> = { EUR: 1, JPY: jpy, ISK: isk };
+    const inr = Number(fetchedData.rates.INR);
+    if (jpy > 0 && isk > 0 && inr > 0 && fetchedData.date) {
+      const rates: Record<SupportedPaymentCurrency, number> = { EUR: 1, JPY: jpy, ISK: isk, INR: inr };
       serverRatesCache = { rates, date: fetchedData.date, fetchedAt: Date.now() };
       return { rates, date: fetchedData.date };
     }
@@ -256,7 +268,7 @@ export async function calculateServerOrderAmount(
 
   if (!cleanCurrency || !SUPPORTED_PAYMENT_CURRENCIES.includes(cleanCurrency)) {
     throw new Error(
-      `Unsupported or invalid currency: '${currency}'. ROAM strictly supports EUR, JPY, and ISK.`
+      `Unsupported or invalid currency: '${currency}'. ROAM strictly supports EUR, JPY, ISK, and INR.`
     );
   }
 

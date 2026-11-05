@@ -4,7 +4,7 @@
  * All activity catalog prices are denominated in base EUR as planning estimates.
  */
 
-export type CurrencyCode = "EUR" | "JPY" | "ISK";
+export type CurrencyCode = "EUR" | "JPY" | "ISK" | "INR";
 
 export interface CurrencyInfo {
   code: CurrencyCode;
@@ -16,9 +16,10 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyInfo> = {
   EUR: { code: "EUR", symbol: "€", name: "Euro" },
   JPY: { code: "JPY", symbol: "¥", name: "Japanese Yen" },
   ISK: { code: "ISK", symbol: "kr", name: "Icelandic Króna" },
+  INR: { code: "INR", symbol: "₹", name: "Indian Rupee" },
 };
 
-export const CURRENCY_OPTIONS: CurrencyCode[] = ["JPY", "EUR", "ISK"];
+export const CURRENCY_OPTIONS: CurrencyCode[] = ["JPY", "EUR", "ISK", "INR"];
 
 export type RateStatus = "loading" | "cached" | "live" | "stale" | "fallback";
 
@@ -35,6 +36,7 @@ export const DEFAULT_RATES_STATE: RatesState = {
     EUR: 1,
     JPY: 0,
     ISK: 0,
+    INR: 0,
   },
   date: null,
   status: "loading",
@@ -83,7 +85,7 @@ export function parseFrankfurterResponse(data: unknown): {
   // Frankfurter v2 format: array of quote objects
   if (Array.isArray(data)) {
     if (data.length === 0) return null;
-    const rates: Record<CurrencyCode, number> = { EUR: 1, JPY: 0, ISK: 0 };
+    const rates: Record<CurrencyCode, number> = { EUR: 1, JPY: 0, ISK: 0, INR: 0 };
     let dateStr = "";
 
     for (const item of data) {
@@ -96,7 +98,7 @@ export function parseFrankfurterResponse(data: unknown): {
         item.rate > 0
       ) {
         const quote = item.quote.toUpperCase() as CurrencyCode;
-        if (quote === "JPY" || quote === "ISK") {
+        if (quote === "JPY" || quote === "ISK" || quote === "INR") {
           rates[quote] = item.rate;
         }
         if (typeof item.date === "string" && !dateStr) {
@@ -105,7 +107,7 @@ export function parseFrankfurterResponse(data: unknown): {
       }
     }
 
-    if (rates.JPY > 0 && rates.ISK > 0 && dateStr && isValidRateDate(dateStr)) {
+    if (rates.JPY > 0 && rates.ISK > 0 && rates.INR > 0 && dateStr && isValidRateDate(dateStr)) {
       return { rates, date: dateStr };
     }
   }
@@ -120,9 +122,10 @@ export function parseFrankfurterResponse(data: unknown): {
   ) {
     const jpy = Number(obj.rates.JPY);
     const isk = Number(obj.rates.ISK);
-    if (Number.isFinite(jpy) && jpy > 0 && Number.isFinite(isk) && isk > 0) {
+    const inr = Number(obj.rates.INR);
+    if (Number.isFinite(jpy) && jpy > 0 && Number.isFinite(isk) && isk > 0 && Number.isFinite(inr) && inr > 0) {
       return {
-        rates: { EUR: 1, JPY: jpy, ISK: isk },
+        rates: { EUR: 1, JPY: jpy, ISK: isk, INR: inr },
         date: obj.date,
       };
     }
@@ -148,6 +151,8 @@ export function loadCachedRates(): RatesState | null {
       parsed.rates.JPY > 0 &&
       typeof parsed.rates.ISK === "number" &&
       parsed.rates.ISK > 0 &&
+      typeof parsed.rates.INR === "number" &&
+      parsed.rates.INR > 0 &&
       isValidRateDate(parsed.date)
     ) {
       return {
@@ -155,6 +160,7 @@ export function loadCachedRates(): RatesState | null {
           EUR: 1,
           JPY: parsed.rates.JPY,
           ISK: parsed.rates.ISK,
+          INR: parsed.rates.INR,
         },
         date: parsed.date,
         status: "cached",
@@ -193,8 +199,8 @@ export async function fetchExchangeRates(timeoutMs = 8000): Promise<{
   rates: Record<CurrencyCode, number>;
   date: string;
 }> {
-  const v2Url = "https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY,ISK";
-  const v1Url = "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=JPY,ISK";
+  const v2Url = "https://api.frankfurter.dev/v2/rates?base=EUR&quotes=JPY,ISK,INR";
+  const v1Url = "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=JPY,ISK,INR";
 
   // Try official v2 endpoint
   try {
