@@ -728,8 +728,9 @@ export function createRazorpayRouter(options?: {
     try {
       const { amount, currency, receipt, notes, items } = req.body;
 
-      // Validate optional receipt: if provided, must be valid; reject invalid with HTTP 400
-      if (receipt !== undefined && receipt !== null && receipt !== "") {
+      // Validate optional receipt: generate default ONLY when omitted (undefined).
+      // If explicitly supplied as null, empty string, non-string, or invalid format, reject with HTTP 400.
+      if (receipt !== undefined) {
         if (!isValidReceipt(receipt)) {
           res.status(400).json({
             error: "Invalid receipt format: receipt must be an alphanumeric string up to 40 characters (hyphens and underscores allowed).",

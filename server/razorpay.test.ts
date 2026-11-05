@@ -1520,7 +1520,77 @@ describe("ROAM Razorpay Server Logic", () => {
     });
 
     describe("POST /api/razorpay/create-order input validation", () => {
-      it("rejects invalid receipt format when supplied with HTTP 400", async () => {
+      it("accepts an omitted receipt and generates a default receipt", async () => {
+        const mockRazorpay = {
+          orders: {
+            create: async (payload: any) => ({
+              id: "order_receipt_omitted",
+              amount: payload.amount,
+              currency: payload.currency,
+              receipt: payload.receipt,
+            }),
+          },
+        };
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({ razorpayClientOverride: mockRazorpay }));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+            }),
+          });
+
+          expect(res.status).toBe(201);
+          const body = await res.json();
+          expect(body.orderId).toBe("order_receipt_omitted");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("accepts a valid supplied receipt", async () => {
+        let receivedReceipt = "";
+        const mockRazorpay = {
+          orders: {
+            create: async (payload: any) => {
+              receivedReceipt = payload.receipt;
+              return {
+                id: "order_receipt_custom",
+                amount: payload.amount,
+                currency: payload.currency,
+                receipt: payload.receipt,
+              };
+            },
+          },
+        };
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({ razorpayClientOverride: mockRazorpay }));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: "custom-receipt_12345",
+            }),
+          });
+
+          expect(res.status).toBe(201);
+          expect(receivedReceipt).toBe("custom-receipt_12345");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt: null with HTTP 400", async () => {
         const app = express();
         app.use(express.json());
         app.use("/api/razorpay", createRazorpayRouter({}));
@@ -1532,7 +1602,127 @@ describe("ROAM Razorpay Server Logic", () => {
             body: JSON.stringify({
               items: [{ activityId: "kyoto-tea", quantity: 1 }],
               currency: "EUR",
-              receipt: "invalid receipt with spaces & symbols!",
+              receipt: null,
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt: \"\" (empty string) with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: "",
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt: 123 with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: 123,
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt: {} with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: {},
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt: \"!@#$%\" with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: "!@#$%",
+            }),
+          });
+
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(body.error).toContain("Invalid receipt format");
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("rejects receipt longer than 40 characters with HTTP 400", async () => {
+        const app = express();
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+        try {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              items: [{ activityId: "kyoto-tea", quantity: 1 }],
+              currency: "EUR",
+              receipt: "a".repeat(41),
             }),
           });
 
