@@ -17,6 +17,9 @@ export async function startServer() {
   const app = express();
   const server = createServer(app);
 
+  // Trust 1 hop from the local NGINX reverse proxy (port 8080 -> 3000)
+  app.set("trust proxy", 1);
+
   app.use(express.json());
 
   // Register Razorpay sandbox API endpoints

@@ -27,6 +27,11 @@ import {
   isValidRazorpaySignature,
   isValidReceipt,
   validateRazorpayNotes,
+  rateLimitStore,
+  resetRateLimitStore,
+  createRateLimiter,
+  cleanupExpiredRateLimits,
+  getClientIp,
   type StoredOrder,
 } from "./razorpay";
 
@@ -65,6 +70,7 @@ describe("ROAM Razorpay Server Logic", () => {
   afterEach(() => {
     clearOrderStorage();
     resetExchangeRatesCache();
+    resetRateLimitStore();
     try {
       if (fs.existsSync(tempStorageDir)) {
         fs.rmSync(tempStorageDir, { recursive: true, force: true });
@@ -1864,6 +1870,368 @@ describe("ROAM Razorpay Server Logic", () => {
           await server.close();
         }
       });
+    });
+  });
+
+  describe("S3-02: Rate Limiting", () => {
+    it("enforces 10 requests per 60s on POST /api/razorpay/create-order and short-circuits on 11th request", async () => {
+      let currentTime = 1_000_000;
+      let mockCreateCallCount = 0;
+      const fakeRazorpay = {
+        orders: {
+          create: async (data: any) => {
+            mockCreateCallCount++;
+            return {
+              id: `order_mock_${mockCreateCallCount}`,
+              amount: data.amount,
+              currency: data.currency,
+              receipt: data.receipt,
+              status: "created",
+            };
+          },
+        },
+      };
+
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          razorpayClientOverride: fakeRazorpay,
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      const requestBody = {
+        currency: "EUR",
+        items: [{ activityId: "kyoto-tea", quantity: 1 }],
+      };
+
+      try {
+        // Send 10 allowed requests
+        for (let i = 1; i <= 10; i++) {
+          const res = await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          });
+          expect(res.status).toBe(201);
+        }
+        expect(mockCreateCallCount).toBe(10);
+
+        // 11th request must be rejected with HTTP 429
+        const res11 = await fetch(`${server.url}/api/razorpay/create-order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+
+        expect(res11.status).toBe(429);
+        expect(res11.headers.get("retry-after")).toBe("60");
+
+        const body11 = await res11.json();
+        expect(body11.error).toContain("Too many requests");
+        expect(body11.retryAfter).toBe(60);
+
+        // Verify short-circuiting: underlying create method was NOT called on 11th request
+        expect(mockCreateCallCount).toBe(10);
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("enforces 10 requests per 60s on POST /api/razorpay/verify-payment", async () => {
+      let currentTime = 2_000_000;
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // Send 10 requests (all fail validation with 400, but rate limiter still registers the attempts)
+        for (let i = 1; i <= 10; i++) {
+          const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          expect(res.status).toBe(400);
+        }
+
+        // 11th request must return 429
+        const res11 = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        expect(res11.status).toBe(429);
+        expect(res11.headers.get("retry-after")).toBe("60");
+        const body11 = await res11.json();
+        expect(body11.error).toContain("Too many requests");
+        expect(body11.retryAfter).toBe(60);
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("enforces 15 requests per 60s on POST /api/razorpay/record-failure", async () => {
+      let currentTime = 3_000_000;
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // Send 15 requests
+        for (let i = 1; i <= 15; i++) {
+          const res = await fetch(`${server.url}/api/razorpay/record-failure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          expect(res.status).toBe(400); // 400 validation error
+        }
+
+        // 16th request must return 429
+        const res16 = await fetch(`${server.url}/api/razorpay/record-failure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        expect(res16.status).toBe(429);
+        expect(res16.headers.get("retry-after")).toBe("60");
+        const body16 = await res16.json();
+        expect(body16.error).toContain("Too many requests");
+        expect(body16.retryAfter).toBe(60);
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("maintains independent rate limit buckets per client IP address", async () => {
+      let currentTime = 4_000_000;
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // IP 1: send 10 requests to reach limit
+        for (let i = 1; i <= 10; i++) {
+          const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "203.0.113.1",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(res.status).toBe(400);
+        }
+
+        // IP 1: 11th request is 429
+        const resIp1 = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "203.0.113.1",
+          },
+          body: JSON.stringify({}),
+        });
+        expect(resIp1.status).toBe(429);
+
+        // IP 2: distinct IP address must NOT be rate limited
+        const resIp2 = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "203.0.113.2",
+          },
+          body: JSON.stringify({}),
+        });
+        expect(resIp2.status).toBe(400); // reaches endpoint validation, not 429
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("maintains independent rate limit buckets per endpoint for the same client IP", async () => {
+      let currentTime = 5_000_000;
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // Exhaust create-order limit (10 requests)
+        for (let i = 1; i <= 10; i++) {
+          await fetch(`${server.url}/api/razorpay/create-order`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ currency: "EUR", items: [] }),
+          });
+        }
+
+        // 11th create-order request is 429
+        const resCreateOrder11 = await fetch(`${server.url}/api/razorpay/create-order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ currency: "EUR", items: [] }),
+        });
+        expect(resCreateOrder11.status).toBe(429);
+
+        // verify-payment from same IP must NOT be blocked
+        const resVerify = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(resVerify.status).toBe(400); // passes rate limiter to endpoint validation
+
+        // record-failure from same IP must NOT be blocked
+        const resFailure = await fetch(`${server.url}/api/razorpay/record-failure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(resFailure.status).toBe(400); // passes rate limiter to endpoint validation
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("resets rate limit window deterministically when time advances past 60s without sleeping", async () => {
+      let currentTime = 6_000_000;
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          getTime: () => currentTime,
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // Exhaust verify-payment (10 requests)
+        for (let i = 1; i <= 10; i++) {
+          await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+        }
+
+        // 11th is 429
+        const resBlocked = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(resBlocked.status).toBe(429);
+        expect(resBlocked.headers.get("retry-after")).toBe("60");
+
+        // Advance simulated time by 60,001 ms (window expired)
+        currentTime += 60_001;
+
+        // Next request must now succeed past limiter without 429
+        const resAllowed = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(resAllowed.status).toBe(400); // reaches endpoint validation, not 429
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("cleans up expired entries and bounds store capacity against unbounded memory growth", () => {
+      const store = new Map();
+      const now = 1_000_000;
+
+      // Add entries: 2 expired, 2 active
+      store.set("key1", { count: 5, resetAt: now - 1000 }); // expired
+      store.set("key2", { count: 3, resetAt: now - 500 }); // expired
+      store.set("key3", { count: 2, resetAt: now + 30000 }); // active
+      store.set("key4", { count: 1, resetAt: now + 40000 }); // active
+
+      expect(store.size).toBe(4);
+
+      // Cleanup expired entries
+      cleanupExpiredRateLimits(store, now, 10);
+      expect(store.size).toBe(2);
+      expect(store.has("key1")).toBe(false);
+      expect(store.has("key2")).toBe(false);
+      expect(store.has("key3")).toBe(true);
+      expect(store.has("key4")).toBe(true);
+
+      // Test memory bounding when active entries exceed maxSize
+      cleanupExpiredRateLimits(store, now, 1);
+      expect(store.size).toBe(1);
+    });
+
+    it("strictly bounds in-memory store size when large numbers of distinct IPs arrive", async () => {
+      const customStore = new Map();
+      const app = express();
+      app.set("trust proxy", 1);
+      app.use(express.json());
+      app.use(
+        "/api/razorpay",
+        createRazorpayRouter({
+          rateLimitStore: customStore,
+          maxStoreSize: 5, // strict limit of 5 entries
+        })
+      );
+      const server = await createTestServer(app);
+
+      try {
+        // Send requests from 15 distinct IP addresses
+        for (let i = 1; i <= 15; i++) {
+          await fetch(`${server.url}/api/razorpay/record-failure`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": `198.51.100.${i}`,
+            },
+            body: JSON.stringify({}),
+          });
+        }
+
+        // Store must not grow past 5 entries
+        expect(customStore.size).toBeLessThanOrEqual(5);
+      } finally {
+        await server.close();
+      }
     });
   });
 });

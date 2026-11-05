@@ -653,13 +653,175 @@ export function getRazorpayCredentials(overrides?: {
 }
 
 // ---------------------------------------------------------------------------
+// S3-02: Rate Limiting
+// ---------------------------------------------------------------------------
+
+export interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+export interface RateLimiterOptions {
+  windowMs?: number;
+  max: number;
+  endpointKey: string;
+  maxStoreSize?: number;
+  getTime?: () => number;
+  message?: string;
+  store?: Map<string, RateLimitEntry>;
+}
+
+export interface RazorpayRouterOptions {
+  razorpayClientOverride?: any;
+  getTime?: () => number;
+  rateLimitStore?: Map<string, RateLimitEntry>;
+  createOrderLimit?: number;
+  verifyPaymentLimit?: number;
+  recordFailureLimit?: number;
+  windowMs?: number;
+  maxStoreSize?: number;
+}
+
+export const DEFAULT_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 60 seconds
+export const DEFAULT_MAX_STORE_SIZE = 5000;
+export const rateLimitStore = new Map<string, RateLimitEntry>();
+
+export function resetRateLimitStore(): void {
+  rateLimitStore.clear();
+}
+
+/**
+ * Extracts normalized client IP address from Express request.
+ * Relies on req.ip when Express 'trust proxy' is configured, falling back to remoteAddress.
+ */
+export function getClientIp(req: Request): string {
+  const rawIp = req.ip || req.socket?.remoteAddress || "127.0.0.1";
+  return rawIp.replace(/^::ffff:/, "");
+}
+
+/**
+ * Sweeps expired rate limit entries from the store.
+ * If store still exceeds maxSize, evicts oldest entries to enforce a strict memory bound.
+ */
+export function cleanupExpiredRateLimits(
+  store: Map<string, RateLimitEntry>,
+  now: number,
+  maxSize: number = DEFAULT_MAX_STORE_SIZE
+): void {
+  store.forEach((entry, key) => {
+    if (now >= entry.resetAt) {
+      store.delete(key);
+    }
+  });
+
+  if (store.size > maxSize) {
+    const overflow = store.size - maxSize;
+    let evicted = 0;
+    store.forEach((_, key) => {
+      if (evicted < overflow) {
+        store.delete(key);
+        evicted++;
+      }
+    });
+  }
+}
+
+/**
+ * Reusable in-memory rate limiting middleware.
+ * Returns HTTP 429 with 'Retry-After' header and JSON error containing 'retryAfter' when exceeded.
+ * Short-circuits rejected requests so underlying endpoint logic and disk writes are never executed.
+ */
+export function createRateLimiter(options: RateLimiterOptions) {
+  const windowMs = options.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+  const max = options.max;
+  const endpointKey = options.endpointKey;
+  const maxStoreSize = options.maxStoreSize ?? DEFAULT_MAX_STORE_SIZE;
+  const getTime = options.getTime ?? (() => Date.now());
+  const store = options.store ?? rateLimitStore;
+  const message = options.message ?? "Too many requests. Please wait a moment before trying again.";
+
+  return (req: Request, res: Response, next: () => void) => {
+    const now = getTime();
+    const clientIp = getClientIp(req);
+    const key = `${endpointKey}:${clientIp}`;
+
+    // Periodic / threshold cleanup to bound memory footprint
+    if (store.size >= maxStoreSize) {
+      cleanupExpiredRateLimits(store, now, maxStoreSize);
+    }
+
+    let entry = store.get(key);
+
+    if (!entry || now >= entry.resetAt) {
+      // If store is still at capacity, evict oldest entry before inserting
+      if (!entry && store.size >= maxStoreSize) {
+        const oldestKey = store.keys().next().value;
+        if (oldestKey) {
+          store.delete(oldestKey);
+        }
+      }
+      entry = { count: 1, resetAt: now + windowMs };
+      store.set(key, entry);
+      return next();
+    }
+
+    if (entry.count >= max) {
+      const retryAfter = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfter));
+      res.status(429).json({
+        error: message,
+        retryAfter,
+      });
+      return;
+    }
+
+    entry.count += 1;
+    return next();
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Express Router
 // ---------------------------------------------------------------------------
 
-export function createRazorpayRouter(options?: {
-  razorpayClientOverride?: any;
-}): Router {
+export function createRazorpayRouter(options?: RazorpayRouterOptions): Router {
   const router = Router();
+
+  const getTime = options?.getTime ?? (() => Date.now());
+  const store = options?.rateLimitStore ?? rateLimitStore;
+  const maxStoreSize = options?.maxStoreSize ?? DEFAULT_MAX_STORE_SIZE;
+  const windowMs = options?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS;
+
+  // S3-02 Rate limiters per endpoint and IP:
+  // - POST /create-order: 10 requests / 60s
+  // - POST /verify-payment: 10 requests / 60s
+  // - POST /record-failure: 15 requests / 60s
+  const createOrderLimiter = createRateLimiter({
+    endpointKey: "create-order",
+    max: options?.createOrderLimit ?? 10,
+    windowMs,
+    getTime,
+    store,
+    maxStoreSize,
+  });
+
+  const verifyPaymentLimiter = createRateLimiter({
+    endpointKey: "verify-payment",
+    max: options?.verifyPaymentLimit ?? 10,
+    windowMs,
+    getTime,
+    store,
+    maxStoreSize,
+  });
+
+  const recordFailureLimiter = createRateLimiter({
+    endpointKey: "record-failure",
+    max: options?.recordFailureLimit ?? 15,
+    windowMs,
+    getTime,
+    store,
+    maxStoreSize,
+  });
 
   /**
    * GET /api/razorpay/config
@@ -724,7 +886,7 @@ export function createRazorpayRouter(options?: {
    * Validates items, currency, and creates an authoritative sandbox test order.
    * Client-supplied amount is ignored; server calculation is authoritative.
    */
-  router.post("/create-order", async (req: Request, res: Response) => {
+  router.post("/create-order", createOrderLimiter, async (req: Request, res: Response) => {
     try {
       const { amount, currency, receipt, notes, items } = req.body;
 
@@ -837,7 +999,7 @@ export function createRazorpayRouter(options?: {
    * - Independently fetches payment status, amount, and currency from Razorpay SDK (Issue 4).
    * - Never marks an order paid before successful end-to-end verification.
    */
-  router.post("/verify-payment", async (req: Request, res: Response) => {
+  router.post("/verify-payment", verifyPaymentLimiter, async (req: Request, res: Response) => {
     try {
       const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
@@ -1054,7 +1216,7 @@ export function createRazorpayRouter(options?: {
    * Handles browser cancellation or failure reports safely (Issue 5).
    * Untrusted browser messages cannot override an already verified paid state.
    */
-  router.post("/record-failure", (req: Request, res: Response) => {
+  router.post("/record-failure", recordFailureLimiter, (req: Request, res: Response) => {
     const { orderId, reason, type } = req.body;
 
     if (!orderId || typeof orderId !== "string" || !isValidRazorpayOrderId(orderId)) {
