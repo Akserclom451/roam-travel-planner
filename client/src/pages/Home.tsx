@@ -440,7 +440,7 @@ const activityData: Record<DestinationId, Activity[]> = {
       duration: "1 hr 45 min",
       price: 14,
       location: "Badi Chaupar, Jaipur",
-      image: "https://images.unsplash.com/photo-1603262110263-fb010d6e59d4?auto=format&fit=crop&w=900&q=86",
+      image: "https://images.unsplash.com/photo-1598324789736-4861f89564a0?auto=format&fit=crop&w=900&q=86",
       accent: "#a14d35",
     },
     {
