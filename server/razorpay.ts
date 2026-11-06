@@ -698,12 +698,13 @@ export function resetRateLimitStore(): void {
  * - "0", "false", "off", "none": disables proxy trust (boolean false)
  * - "true", "all": enables full proxy trust (boolean true)
  * - "loopback", "linklocal", "uniquelocal", CIDR blocks, or comma-separated list: string or string array
- * - Undefined / empty in development: defaults to 2 (Cloud Run GFE -> local NGINX -> Node)
- * - Undefined / empty in production: defaults to false (fail-safe zero trust against header spoofing)
+ * - "true", "all": strictly prohibited and throws descriptive configuration error
+ * - Undefined / empty in both development and production: defaults to false (fail-safe zero trust).
+ *   AI Studio hosted development must explicitly configure TRUST_PROXY=2.
  */
 export function parseTrustProxy(
   rawVal: string | undefined,
-  isProduction: boolean
+  isProduction?: boolean
 ): boolean | number | string | string[] {
   if (rawVal !== undefined && rawVal.trim() !== "") {
     const trimmed = rawVal.trim().toLowerCase();
@@ -713,9 +714,11 @@ export function parseTrustProxy(
       return false;
     }
 
-    // Explicit enable
+    // Explicit enable ("true" and "all" are unsafe and strictly prohibited)
     if (trimmed === "true" || trimmed === "all") {
-      return true;
+      throw new Error(
+        "Invalid TRUST_PROXY configuration: 'true' and 'all' are unsafe and strictly prohibited. Specify an explicit hop count (e.g. '1', '2'), named subnets (e.g. 'loopback'), or 'false'."
+      );
     }
 
     // Numeric hop count
@@ -744,17 +747,12 @@ export function parseTrustProxy(
     }
 
     throw new Error(
-      `Invalid TRUST_PROXY configuration: '${rawVal}'. Supported values: non-negative integer, 'false', 'true', 'loopback', 'linklocal', 'uniquelocal', or CIDR subnets.`
+      `Invalid TRUST_PROXY configuration: '${rawVal}'. Supported values: non-negative integer, 'false', 'loopback', 'linklocal', 'uniquelocal', or CIDR subnets.`
     );
   }
 
-  // Safe defaults when TRUST_PROXY is omitted
-  if (!isProduction) {
-    // In AI Studio hosted preview: Cloud Run GFE -> Container NGINX -> Node (2 hops)
-    return 2;
-  }
-
-  // Production without explicit TRUST_PROXY: fail-safe to false (zero trust)
+  // Safe defaults when TRUST_PROXY is omitted: fail-safe to false (zero trust).
+  // AI Studio hosted development must explicitly configure TRUST_PROXY=2.
   return false;
 }
 

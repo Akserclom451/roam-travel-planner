@@ -2249,9 +2249,13 @@ describe("ROAM Razorpay Server Logic", () => {
         expect(parseTrustProxy("none", true)).toBe(false);
       });
 
-      it("parses 'true' and 'all' into boolean true", () => {
-        expect(parseTrustProxy("true", false)).toBe(true);
-        expect(parseTrustProxy("all", true)).toBe(true);
+      it("throws descriptive error when TRUST_PROXY is 'true' or 'all'", () => {
+        expect(() => parseTrustProxy("true", false)).toThrow(
+          "Invalid TRUST_PROXY configuration: 'true' and 'all' are unsafe and strictly prohibited"
+        );
+        expect(() => parseTrustProxy("all", true)).toThrow(
+          "Invalid TRUST_PROXY configuration: 'true' and 'all' are unsafe and strictly prohibited"
+        );
       });
 
       it("parses named subnets and comma-separated subnet lists", () => {
@@ -2268,11 +2272,11 @@ describe("ROAM Razorpay Server Logic", () => {
         expect(() => parseTrustProxy(",,", false)).toThrow("Invalid TRUST_PROXY configuration");
       });
 
-      it("uses correct safe defaults when TRUST_PROXY is omitted", () => {
-        // Dev default: 2 hops (GFE -> NGINX -> Node)
-        expect(parseTrustProxy(undefined, false)).toBe(2);
-        expect(parseTrustProxy("", false)).toBe(2);
-        expect(parseTrustProxy("   ", false)).toBe(2);
+      it("uses correct safe defaults when TRUST_PROXY is omitted (false for all environments)", () => {
+        // Dev default: fail-safe false (AI Studio hosted dev must explicitly configure TRUST_PROXY=2)
+        expect(parseTrustProxy(undefined, false)).toBe(false);
+        expect(parseTrustProxy("", false)).toBe(false);
+        expect(parseTrustProxy("   ", false)).toBe(false);
 
         // Prod default: fail-safe false (zero trust against spoofing)
         expect(parseTrustProxy(undefined, true)).toBe(false);
@@ -2363,6 +2367,123 @@ describe("ROAM Razorpay Server Logic", () => {
             body: JSON.stringify({}),
           });
           expect(resBlocked.status).toBe(429);
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("correctly identifies client IP and resists spoofing with 'loopback' trust", async () => {
+        // App 1: Proxied connection from local loopback (127.0.0.1)
+        const appLoopback = express();
+        appLoopback.set("trust proxy", parseTrustProxy("loopback", false));
+        appLoopback.use(express.json());
+        appLoopback.use("/api/razorpay", createRazorpayRouter({}));
+        const serverLoopback = await createTestServer(appLoopback);
+
+        try {
+          // 1. Proxied request from 127.0.0.1 with X-Forwarded-For: "1.1.1.1, 203.0.113.10"
+          // Express trusts 127.0.0.1 (loopback), stops at 203.0.113.10 (untrusted non-loopback), ignoring 1.1.1.1.
+          for (let i = 1; i <= 10; i++) {
+            const res = await fetch(`${serverLoopback.url}/api/razorpay/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": "1.1.1.1, 203.0.113.10",
+              },
+              body: JSON.stringify({}),
+            });
+            expect(res.status).toBe(400);
+          }
+
+          // 11th request from 203.0.113.10 is rate limited
+          const resBlocked = await fetch(`${serverLoopback.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "different_spoof, 203.0.113.10",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(resBlocked.status).toBe(429);
+          expect(resBlocked.headers.get("retry-after")).toBe("60");
+        } finally {
+          await serverLoopback.close();
+        }
+
+        // App 2: Direct connection from a simulated non-loopback socket address
+        const appDirect = express();
+        appDirect.set("trust proxy", parseTrustProxy("loopback", false));
+        appDirect.use((req, _res, next) => {
+          // Simulate direct external client socket
+          Object.defineProperty(req.socket, "remoteAddress", { value: "198.51.100.77", configurable: true });
+          next();
+        });
+        appDirect.use(express.json());
+        appDirect.use("/api/razorpay", createRazorpayRouter({}));
+        const serverDirect = await createTestServer(appDirect);
+
+        try {
+          // Attacker directly connects from 198.51.100.77 and sends spoofed X-Forwarded-For
+          for (let i = 1; i <= 10; i++) {
+            const res = await fetch(`${serverDirect.url}/api/razorpay/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": `1.1.1.${i}`,
+              },
+              body: JSON.stringify({}),
+            });
+            expect(res.status).toBe(400);
+          }
+
+          // 11th request is blocked because Express rejects XFF for non-loopback socket
+          const resBlocked = await fetch(`${serverDirect.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "9.9.9.9",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(resBlocked.status).toBe(429);
+        } finally {
+          await serverDirect.close();
+        }
+      });
+
+      it("demonstrates the limitation of numeric hop-count trust when a short proxy chain occurs", async () => {
+        // LIMITATION DEMONSTRATION:
+        // When 'trust proxy' is configured with numeric hop count 2 (expecting GFE + NGINX),
+        // but an incoming request only traverses 1 proxy (e.g. client connects directly to NGINX,
+        // or an internal caller bypasses the outer cloud load balancer), Express unconditionally
+        // trusts 2 hops from the right.
+        // It treats the genuine client IP as the 2nd trusted proxy and accepts whatever spoofed IP
+        // the client supplied to the left!
+        const app = express();
+        app.set("trust proxy", parseTrustProxy("2", false)); // configured for 2 hops
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+
+        try {
+          // Attacker (203.0.113.10) directly reaches NGINX (1 hop instead of expected 2).
+          // NGINX appends the attacker IP: "spoofed.ip, 203.0.113.10".
+          // Because trust proxy=2, Express peels Hop 1 (127.0.0.1 socket) AND Hop 2 (203.0.113.10),
+          // landing on the attacker-supplied "spoofed.ip"!
+          // By cycling spoofed IPs, the attacker can evade rate-limiting in a short-chain scenario:
+          for (let i = 1; i <= 15; i++) {
+            const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                // Each request uses a distinct spoofed IP in the 1-hop chain
+                "X-Forwarded-For": `10.99.1.${i}, 203.0.113.10`,
+              },
+              body: JSON.stringify({}),
+            });
+            // None of these 15 requests are blocked with 429 because numeric trust peeled past the client IP
+            expect(res.status).toBe(400);
+          }
         } finally {
           await server.close();
         }
