@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import fs from "fs";
+import net from "net";
 import path from "path";
 import { Router, type Request, type Response } from "express";
 import Razorpay from "razorpay";
@@ -691,13 +692,39 @@ export function resetRateLimitStore(): void {
 }
 
 /**
+ * Validates whether a string is a valid IPv4 or IPv6 CIDR block.
+ */
+export function isValidCIDR(str: string): boolean {
+  const parts = str.split("/");
+  if (parts.length !== 2) return false;
+  const [ip, prefixStr] = parts;
+  if (!/^\d+$/.test(prefixStr)) return false;
+  const prefix = parseInt(prefixStr, 10);
+  const ipType = net.isIP(ip);
+  if (ipType === 4) return prefix >= 0 && prefix <= 32;
+  if (ipType === 6) return prefix >= 0 && prefix <= 128;
+  return false;
+}
+
+/**
+ * Validates whether a string is a recognized named subnet ("loopback", "linklocal", "uniquelocal"),
+ * a valid IP address, or a valid CIDR block.
+ */
+export function isValidSubnetOrIP(str: string): boolean {
+  const named = ["loopback", "linklocal", "uniquelocal"];
+  if (named.includes(str)) return true;
+  if (net.isIP(str) !== 0) return true;
+  return isValidCIDR(str);
+}
+
+/**
  * Safely parses the TRUST_PROXY environment variable for Express.
  *
  * Supported formats:
  * - Integer numbers / numeric strings: hop count (e.g. "1", "2")
  * - "0", "false", "off", "none": disables proxy trust (boolean false)
- * - "true", "all": enables full proxy trust (boolean true)
- * - "loopback", "linklocal", "uniquelocal", CIDR blocks, or comma-separated list: string or string array
+ * - "loopback", "linklocal", "uniquelocal", valid IP address, or valid CIDR block: string
+ * - Comma-separated list of valid subnets/IPs/CIDRs: string array (no empty entries allowed)
  * - "true", "all": strictly prohibited and throws descriptive configuration error
  * - Undefined / empty in both development and production: defaults to false (fail-safe zero trust).
  *   AI Studio hosted development must explicitly configure TRUST_PROXY=2.
@@ -732,22 +759,34 @@ export function parseTrustProxy(
       return hops === 0 ? false : hops;
     }
 
-    // Comma-separated subnets
+    // Comma-separated subnets: must not contain empty entries and each entry must be valid
     if (trimmed.includes(",")) {
-      const subnets = trimmed.split(",").map((s) => s.trim()).filter(Boolean);
-      if (subnets.length === 0) {
-        throw new Error(`Invalid TRUST_PROXY configuration: '${rawVal}'. Subnet list cannot be empty.`);
+      const parts = trimmed.split(",");
+      const subnets: string[] = [];
+      for (const part of parts) {
+        const item = part.trim();
+        if (!item) {
+          throw new Error(
+            `Invalid TRUST_PROXY configuration: '${rawVal}'. Subnet list contains empty entries.`
+          );
+        }
+        if (!isValidSubnetOrIP(item)) {
+          throw new Error(
+            `Invalid TRUST_PROXY configuration: '${rawVal}'. Subnet or CIDR '${item}' is invalid.`
+          );
+        }
+        subnets.push(item);
       }
       return subnets;
     }
 
-    // Named standard subnets or CIDRs
-    if (["loopback", "linklocal", "uniquelocal"].includes(trimmed) || trimmed.includes("/")) {
+    // Single named standard subnet, valid IP address, or valid CIDR block
+    if (isValidSubnetOrIP(trimmed)) {
       return trimmed;
     }
 
     throw new Error(
-      `Invalid TRUST_PROXY configuration: '${rawVal}'. Supported values: non-negative integer, 'false', 'loopback', 'linklocal', 'uniquelocal', or CIDR subnets.`
+      `Invalid TRUST_PROXY configuration: '${rawVal}'. Supported values: non-negative integer, 'false', 'loopback', 'linklocal', 'uniquelocal', valid IP address, or valid CIDR block.`
     );
   }
 

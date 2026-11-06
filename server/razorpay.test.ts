@@ -33,6 +33,8 @@ import {
   cleanupExpiredRateLimits,
   getClientIp,
   parseTrustProxy,
+  isValidCIDR,
+  isValidSubnetOrIP,
   type StoredOrder,
 } from "./razorpay";
 
@@ -448,6 +450,27 @@ describe("ROAM Razorpay Server Logic", () => {
         expect(data.currency).toBe("JPY");
         expect(data.formattedAmount).toBe("¥3,175");
         expect(data.totalCostEur).toBe(18);
+      } finally {
+        await server.close();
+      }
+    });
+
+    it("GET /api/razorpay/config exposes only public test keyId and NEVER exposes keySecret", async () => {
+      const app = express();
+      app.use("/api/razorpay", createRazorpayRouter({}));
+      const server = await createTestServer(app);
+      try {
+        const res = await fetch(`${server.url}/api/razorpay/config`);
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data).toHaveProperty("isConfigured");
+        expect(data).toHaveProperty("keyId");
+        expect(data).toHaveProperty("isTestMode", true);
+        expect(data).toHaveProperty("supportedCurrencies");
+        expect(data).not.toHaveProperty("keySecret");
+        expect(data).not.toHaveProperty("secret");
+        expect(JSON.stringify(data)).not.toContain("keySecret");
+        expect(JSON.stringify(data)).not.toContain("placeholder_secret_key");
       } finally {
         await server.close();
       }
@@ -2264,12 +2287,33 @@ describe("ROAM Razorpay Server Logic", () => {
         expect(parseTrustProxy("uniquelocal", false)).toBe("uniquelocal");
         expect(parseTrustProxy("10.0.0.0/8", true)).toBe("10.0.0.0/8");
         expect(parseTrustProxy("loopback,linklocal", false)).toEqual(["loopback", "linklocal"]);
+        expect(parseTrustProxy("10.0.0.0/8, loopback", false)).toEqual(["10.0.0.0/8", "loopback"]);
       });
 
-      it("throws descriptive error for invalid configuration values", () => {
+      it("throws descriptive error for invalid configuration values and tokens", () => {
         expect(() => parseTrustProxy("invalid_token", false)).toThrow("Invalid TRUST_PROXY configuration");
         expect(() => parseTrustProxy("-1", false)).toThrow("Invalid TRUST_PROXY configuration");
-        expect(() => parseTrustProxy(",,", false)).toThrow("Invalid TRUST_PROXY configuration");
+      });
+
+      it("rejects malformed CIDRs with descriptive errors", () => {
+        expect(isValidCIDR("10.0.0.0/8")).toBe(true);
+        expect(isValidCIDR("192.168.1.0/24")).toBe(true);
+        expect(isValidCIDR("invalid/cidr")).toBe(false);
+        expect(isValidCIDR("10.0.0.0/99")).toBe(false);
+        expect(isValidCIDR("999.999.999.999/24")).toBe(false);
+        expect(isValidCIDR("10.0.0.0/-1")).toBe(false);
+
+        expect(() => parseTrustProxy("10.0.0.0/99", false)).toThrow("Invalid TRUST_PROXY configuration");
+        expect(() => parseTrustProxy("invalid/cidr", false)).toThrow("Invalid TRUST_PROXY configuration");
+        expect(() => parseTrustProxy("999.999.999.999/24", false)).toThrow("Invalid TRUST_PROXY configuration");
+        expect(() => parseTrustProxy("10.0.0.0/8, invalid/cidr", false)).toThrow("Invalid TRUST_PROXY configuration");
+      });
+
+      it("rejects empty entries in comma-separated subnet lists", () => {
+        expect(() => parseTrustProxy(",,", false)).toThrow("Subnet list contains empty entries");
+        expect(() => parseTrustProxy("loopback, , linklocal", false)).toThrow("Subnet list contains empty entries");
+        expect(() => parseTrustProxy("loopback,", false)).toThrow("Subnet list contains empty entries");
+        expect(() => parseTrustProxy(",loopback", false)).toThrow("Subnet list contains empty entries");
       });
 
       it("uses correct safe defaults when TRUST_PROXY is omitted (false for all environments)", () => {
