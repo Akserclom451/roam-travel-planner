@@ -32,6 +32,7 @@ import {
   createRateLimiter,
   cleanupExpiredRateLimits,
   getClientIp,
+  parseTrustProxy,
   type StoredOrder,
 } from "./razorpay";
 
@@ -2232,6 +2233,140 @@ describe("ROAM Razorpay Server Logic", () => {
       } finally {
         await server.close();
       }
+    });
+
+    describe("parseTrustProxy unit tests", () => {
+      it("parses numeric hop counts into numbers", () => {
+        expect(parseTrustProxy("1", false)).toBe(1);
+        expect(parseTrustProxy("2", false)).toBe(2);
+        expect(parseTrustProxy("10", true)).toBe(10);
+      });
+
+      it("parses '0', 'false', 'off', and 'none' into boolean false", () => {
+        expect(parseTrustProxy("0", false)).toBe(false);
+        expect(parseTrustProxy("false", false)).toBe(false);
+        expect(parseTrustProxy("off", true)).toBe(false);
+        expect(parseTrustProxy("none", true)).toBe(false);
+      });
+
+      it("parses 'true' and 'all' into boolean true", () => {
+        expect(parseTrustProxy("true", false)).toBe(true);
+        expect(parseTrustProxy("all", true)).toBe(true);
+      });
+
+      it("parses named subnets and comma-separated subnet lists", () => {
+        expect(parseTrustProxy("loopback", false)).toBe("loopback");
+        expect(parseTrustProxy("linklocal", true)).toBe("linklocal");
+        expect(parseTrustProxy("uniquelocal", false)).toBe("uniquelocal");
+        expect(parseTrustProxy("10.0.0.0/8", true)).toBe("10.0.0.0/8");
+        expect(parseTrustProxy("loopback,linklocal", false)).toEqual(["loopback", "linklocal"]);
+      });
+
+      it("throws descriptive error for invalid configuration values", () => {
+        expect(() => parseTrustProxy("invalid_token", false)).toThrow("Invalid TRUST_PROXY configuration");
+        expect(() => parseTrustProxy("-1", false)).toThrow("Invalid TRUST_PROXY configuration");
+        expect(() => parseTrustProxy(",,", false)).toThrow("Invalid TRUST_PROXY configuration");
+      });
+
+      it("uses correct safe defaults when TRUST_PROXY is omitted", () => {
+        // Dev default: 2 hops (GFE -> NGINX -> Node)
+        expect(parseTrustProxy(undefined, false)).toBe(2);
+        expect(parseTrustProxy("", false)).toBe(2);
+        expect(parseTrustProxy("   ", false)).toBe(2);
+
+        // Prod default: fail-safe false (zero trust against spoofing)
+        expect(parseTrustProxy(undefined, true)).toBe(false);
+        expect(parseTrustProxy("", true)).toBe(false);
+        expect(parseTrustProxy("   ", true)).toBe(false);
+      });
+    });
+
+    describe("Proxy chain spoofing resistance tests", () => {
+      it("prevents X-Forwarded-For spoofing in a 2-hop chain (trust proxy: 2)", async () => {
+        const app = express();
+        // 2-hop configuration: Cloud Run GFE + Container NGINX
+        app.set("trust proxy", parseTrustProxy("2", false));
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+
+        try {
+          // Attacker (203.0.113.10) sends spoofed "1.1.1.1".
+          // In 2-hop chain, X-Forwarded-For received by Node is: "1.1.1.1, 203.0.113.10, 169.254.8.1"
+          for (let i = 1; i <= 10; i++) {
+            const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": "1.1.1.1, 203.0.113.10, 169.254.8.1",
+              },
+              body: JSON.stringify({}),
+            });
+            expect(res.status).toBe(400); // 400 validation error, not rate limited yet
+          }
+
+          // 11th request with the same client IP (even if attacker changes the spoofed IP to 2.2.2.2) is rate-limited
+          const resBlocked = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "2.2.2.2, 203.0.113.10, 169.254.8.1",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(resBlocked.status).toBe(429);
+          expect(resBlocked.headers.get("retry-after")).toBe("60");
+
+          // Different real client (203.0.113.20) is NOT blocked
+          const resOtherClient = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "203.0.113.20, 169.254.8.1",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(resOtherClient.status).toBe(400);
+        } finally {
+          await server.close();
+        }
+      });
+
+      it("prevents X-Forwarded-For spoofing when trust proxy is disabled (false)", async () => {
+        const app = express();
+        app.set("trust proxy", parseTrustProxy("false", true)); // trust proxy = false
+        app.use(express.json());
+        app.use("/api/razorpay", createRazorpayRouter({}));
+        const server = await createTestServer(app);
+
+        try {
+          // Attacker sends arbitrary X-Forwarded-For headers, but socket address is loopback 127.0.0.1
+          for (let i = 1; i <= 10; i++) {
+            const res = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Forwarded-For": `198.51.100.${i}`, // varying spoofed header
+              },
+              body: JSON.stringify({}),
+            });
+            expect(res.status).toBe(400);
+          }
+
+          // 11th request from the same socket is blocked with 429 because X-Forwarded-For is ignored
+          const resBlocked = await fetch(`${server.url}/api/razorpay/verify-payment`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Forwarded-For": "9.9.9.9",
+            },
+            body: JSON.stringify({}),
+          });
+          expect(resBlocked.status).toBe(429);
+        } finally {
+          await server.close();
+        }
+      });
     });
   });
 });

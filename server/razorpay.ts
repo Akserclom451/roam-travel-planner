@@ -691,6 +691,74 @@ export function resetRateLimitStore(): void {
 }
 
 /**
+ * Safely parses the TRUST_PROXY environment variable for Express.
+ *
+ * Supported formats:
+ * - Integer numbers / numeric strings: hop count (e.g. "1", "2")
+ * - "0", "false", "off", "none": disables proxy trust (boolean false)
+ * - "true", "all": enables full proxy trust (boolean true)
+ * - "loopback", "linklocal", "uniquelocal", CIDR blocks, or comma-separated list: string or string array
+ * - Undefined / empty in development: defaults to 2 (Cloud Run GFE -> local NGINX -> Node)
+ * - Undefined / empty in production: defaults to false (fail-safe zero trust against header spoofing)
+ */
+export function parseTrustProxy(
+  rawVal: string | undefined,
+  isProduction: boolean
+): boolean | number | string | string[] {
+  if (rawVal !== undefined && rawVal.trim() !== "") {
+    const trimmed = rawVal.trim().toLowerCase();
+
+    // Explicit disable
+    if (trimmed === "false" || trimmed === "0" || trimmed === "off" || trimmed === "none") {
+      return false;
+    }
+
+    // Explicit enable
+    if (trimmed === "true" || trimmed === "all") {
+      return true;
+    }
+
+    // Numeric hop count
+    if (/^\d+$/.test(trimmed)) {
+      const hops = parseInt(trimmed, 10);
+      if (!Number.isFinite(hops) || hops < 0) {
+        throw new Error(
+          `Invalid TRUST_PROXY configuration: '${rawVal}'. Hop count must be a non-negative integer.`
+        );
+      }
+      return hops === 0 ? false : hops;
+    }
+
+    // Comma-separated subnets
+    if (trimmed.includes(",")) {
+      const subnets = trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+      if (subnets.length === 0) {
+        throw new Error(`Invalid TRUST_PROXY configuration: '${rawVal}'. Subnet list cannot be empty.`);
+      }
+      return subnets;
+    }
+
+    // Named standard subnets or CIDRs
+    if (["loopback", "linklocal", "uniquelocal"].includes(trimmed) || trimmed.includes("/")) {
+      return trimmed;
+    }
+
+    throw new Error(
+      `Invalid TRUST_PROXY configuration: '${rawVal}'. Supported values: non-negative integer, 'false', 'true', 'loopback', 'linklocal', 'uniquelocal', or CIDR subnets.`
+    );
+  }
+
+  // Safe defaults when TRUST_PROXY is omitted
+  if (!isProduction) {
+    // In AI Studio hosted preview: Cloud Run GFE -> Container NGINX -> Node (2 hops)
+    return 2;
+  }
+
+  // Production without explicit TRUST_PROXY: fail-safe to false (zero trust)
+  return false;
+}
+
+/**
  * Extracts normalized client IP address from Express request.
  * Relies on req.ip when Express 'trust proxy' is configured, falling back to remoteAddress.
  */

@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createRazorpayRouter } from "./server/razorpay";
+import { createRazorpayRouter, parseTrustProxy } from "./server/razorpay";
 
 try {
   process.loadEnvFile?.();
@@ -17,15 +17,16 @@ export async function startServer() {
   const app = express();
   const server = createServer(app);
 
-  // Trust 1 hop from the local NGINX reverse proxy (port 8080 -> 3000)
-  app.set("trust proxy", 1);
+  const isProduction = process.env.NODE_ENV === "production";
+
+  // Configure reverse proxy trust safely based on environment and TRUST_PROXY
+  const trustProxySetting = parseTrustProxy(process.env.TRUST_PROXY, isProduction);
+  app.set("trust proxy", trustProxySetting);
 
   app.use(express.json());
 
   // Register Razorpay sandbox API endpoints
   app.use("/api/razorpay", createRazorpayRouter());
-
-  const isProduction = process.env.NODE_ENV === "production";
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
