@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -37,7 +38,9 @@ export async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const staticPath = path.resolve(__dirname, "dist", "public");
+    const staticPath = fs.existsSync(path.resolve(__dirname, "public"))
+      ? path.resolve(__dirname, "public")
+      : path.resolve(process.cwd(), "dist", "public");
     app.use(express.static(staticPath));
     app.get("*", (_req, res) => {
       res.sendFile(path.join(staticPath, "index.html"));
